@@ -8,11 +8,13 @@ import { MAX_IMAGE_BYTES, MAX_STORY_IMAGES, IMAGE_PATH, imageMime, isImageSource
 import { imageSize } from "image-size";
 import { validateContacts, DEFAULT_CONTACTS } from "../contact-model.mjs";
 import { MailError, MAIL_OAUTH_COOKIE } from "./mail-service.mjs";
-import { timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { decodeHTML } from "entities";
-import { editorialPage } from "../editorial-model.mjs";
+import { editorialPage, externalLink } from "../editorial-model.mjs";
+import { REACTIONS, emptyReactions, reactionSummary, setReaction } from "../reaction-model.mjs";
 
 const newsletterCookie = "__Secure-entre_senderos_newsletter";
+const reactionsCookie = "__Host-entre_senderos_reactions";
 const newsletterSubmitted = (cookie = "") => cookie.split(";").some((part) => part.trim() === `${newsletterCookie}=1`);
 
 export class HttpError extends Error {
@@ -35,8 +37,8 @@ function sanitizeStory(html) {
   if (typeof html !== "string" || html.length > MAX_TEXT_SIZE) throw new Error("El texto supera el límite de 250.000 caracteres.");
   let images = 0;
   return sanitizeHtml(html, {
-    allowedTags: ["p", "br", "strong", "em", "u", "blockquote", "h2", "h3", "ul", "ol", "li", "img"],
-    allowedAttributes: { img: ["src", "alt"] },
+    allowedTags: ["p", "br", "strong", "em", "u", "blockquote", "h2", "h3", "ul", "ol", "li", "img", "a"],
+    allowedAttributes: { img: ["src", "alt"], a: ["href", "target", "rel"] },
     exclusiveFilter(frame) {
       if (frame.tag !== "img") return false;
       if (!isImageSource(frame.attribs.src)) return true;
@@ -45,7 +47,13 @@ function sanitizeStory(html) {
       if (images > MAX_STORY_IMAGES) throw new Error(`El relato admite hasta ${MAX_STORY_IMAGES} imágenes internas.`);
       return false;
     },
-    transformTags: { b: "strong", i: "em", h1: "h2", div: "p" },
+    transformTags: {
+      b: "strong", i: "em", h1: "h2", div: "p",
+      a(tagName, attributes) {
+        const href = externalLink(attributes.href);
+        return href ? { tagName, attribs: { href, target: "_blank", rel: "noopener noreferrer" } } : { tagName: "span", attribs: {} };
+      },
+    },
     nonTextTags: ["script", "style", "textarea", "option", "noscript", "svg", "math", "iframe", "object", "template"],
   });
 }
@@ -200,6 +208,40 @@ export function createApi({
         await readCatalog(store);
         return response(200, { status: "ok", environment });
       }
+      if (path === "editorial/reactions") {
+        if (!["GET", "PUT"].includes(method)) throw new HttpError(405, "Método no admitido.");
+        if (headers["sec-fetch-site"] === "cross-site") throw new HttpError(403, "El origen de la solicitud no está permitido.");
+        const id = req.query?.id;
+        if (typeof id !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/u.test(id)) throw new HttpError(400, "Elige una publicación válida.");
+        if (method === "PUT") {
+          requireJson();
+          if (!req.body || JSON.stringify(req.body).length > 500 || !REACTIONS.some(({ id }) => id === req.body.reaction) || typeof req.body.active !== "boolean") throw new HttpError(400, "Elige una reacción válida e indica si deseas activarla.");
+          await store.rateLimit("reactions", headers["x-forwarded-for"] || "unknown", { limit: 60, interval: 60_000 });
+        }
+        const collection = await store.read("showcase", { version: 1, texts: [] });
+        if (!collection.value.texts.some((text) => text.id === id) && !(id === "ejemplo" && !collection.value.texts.length)) throw new HttpError(404, "Esta publicación ya no está disponible.");
+        const cookie = (headers.cookie || "").split(";").map((part) => part.trim()).find((part) => part.startsWith(`${reactionsCookie}=`))?.slice(reactionsCookie.length + 1);
+        const token = /^[a-f0-9]{64}$/u.test(cookie || "") ? cookie : randomBytes(32).toString("hex");
+        const visitor = createHash("sha256").update(token).digest("hex");
+        function result(record) {
+          const value = response(200, reactionSummary(record, visitor));
+          if (token !== cookie) value.headers["Set-Cookie"] = `${reactionsCookie}=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=31536000`;
+          return value;
+        }
+        const name = `reactions/${id}`;
+        let current = await store.read(name, emptyReactions());
+        if (method === "GET") return result(current.value);
+        for (let attempt = 0; attempt < 5; attempt += 1) {
+          const next = setReaction(current.value, visitor, req.body.reaction, req.body.active);
+          if (next === current.value) return result(next);
+          try {
+            return result((await store.write(name, next, current.version)).value);
+          } catch (error) {
+            if (![409, 412].includes(error.statusCode) || attempt === 4) throw error;
+            current = await store.read(name, emptyReactions());
+          }
+        }
+      }
       if (method === "GET" && ["editorial", "editorial/entry"].includes(path)) {
         const collection = await store.read("showcase", { version: 1, texts: [] });
         const texts = validateShowcase(collection.value, { sanitize: sanitizeStory, countWords: countStoryWords, allowDataImages: false });
@@ -209,7 +251,7 @@ export function createApi({
           if (!text) throw new HttpError(404, "Esta publicación ya no está disponible.");
           return response(200, { text });
         }
-        const page = editorialPage(texts, { kind: req.query?.tipo, page: req.query?.pagina });
+        const page = editorialPage(texts, { page: req.query?.pagina });
         return response(200, { ...page, example: !texts.length, items: page.items.map(({ html, permissionConfirmed, ...text }) => {
           const words = storyText(html).split(/\s+/u);
           const count = countStoryWords(html);
@@ -283,7 +325,9 @@ export function createApi({
           value.texts = value.texts.map((text) => {
             const previous = current.value.texts.find((item) => item.id === text.id);
             const input = req.body.texts.find((item) => item.id === text.id);
-            return { ...text, kind: input.kind === undefined ? previous?.kind || text.kind : text.kind, publishedAt: previous?.publishedAt || new Date().toISOString() };
+            const previousUrl = externalLink(previous?.authorUrl) || "";
+            if (input.authorUrl === undefined && previousUrl && text.author !== previous.author) throw new HttpError(409, "Recarga el editor antes de cambiar una autoría con blog. No se guardaron cambios.");
+            return { ...text, authorUrl: input.authorUrl === undefined ? previousUrl || text.authorUrl : text.authorUrl, publishedAt: previous?.publishedAt || new Date().toISOString() };
           });
         }
         const result = await store.write(path, value, headers["if-match"]);

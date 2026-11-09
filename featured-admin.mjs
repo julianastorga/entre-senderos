@@ -6,7 +6,7 @@ import { importTextFile } from "./text-import.mjs";
 import { contentStorage, refreshShowcase, persistShowcase, storageLocation } from "./content-store.mjs";
 import { createCoverUpload, uploadImage } from "./image-upload.mjs";
 import { imageElement, MAX_STORY_IMAGES } from "./image-model.mjs";
-import { ENTRY_KINDS, publicationDate } from "./editorial-model.mjs";
+import { externalLink, publicationDate } from "./editorial-model.mjs";
 
 export async function createFeaturedAdmin() {
   const form = document.querySelector("#featured-text-form");
@@ -15,7 +15,7 @@ export async function createFeaturedAdmin() {
   const editor = document.querySelector("#text-editor");
   const title = document.querySelector("#text-title");
   const author = document.querySelector("#text-author");
-  const kind = document.querySelector("#text-kind");
+  const authorUrl = document.querySelector("#text-author-url");
   const permission = document.querySelector("#text-permission");
   const counter = document.querySelector("#text-word-count");
   const status = document.querySelector("#text-admin-status");
@@ -24,12 +24,17 @@ export async function createFeaturedAdmin() {
   const formTitle = document.querySelector("#text-form-title");
   const readingLink = document.querySelector("#text-reading-link");
   const toolbar = form.querySelector(".editor-toolbar");
-  const tools = [...toolbar.querySelectorAll("[data-text-command], [data-text-image]")];
+  const tools = [...toolbar.querySelectorAll("[data-text-command], [data-text-image], [data-text-link]")];
   const imageTool = toolbar.querySelector("[data-text-image]");
   const imagePanel = document.querySelector("#inline-image-panel");
   const imageFile = document.querySelector("#inline-image-file");
   const imageAlt = document.querySelector("#inline-image-alt");
+  const linkTool = toolbar.querySelector("[data-text-link]");
+  const linkPanel = document.querySelector("#inline-link-panel");
+  const linkUrl = document.querySelector("#inline-link-url");
+  const linkText = document.querySelector("#inline-link-text");
   let imageRange = null;
+  let linkRange = null;
   let editingId = null;
   let original = null;
   let dirty = false;
@@ -63,7 +68,7 @@ export async function createFeaturedAdmin() {
     original = text ? JSON.stringify(text) : null;
     title.value = text?.title || "";
     author.value = text?.author || "";
-    kind.value = text?.kind || "post";
+    authorUrl.value = text?.authorUrl || "";
     document.querySelector("#text-publication-date").textContent = text ? publicationDate(text.publishedAt) : "Se publicará con la fecha y hora de Costa Rica al guardar.";
     cover.set(text?.coverImage);
     imagePanel.hidden = true;
@@ -71,6 +76,11 @@ export async function createFeaturedAdmin() {
     imageFile.value = "";
     imageAlt.value = "";
     imageRange = null;
+    linkPanel.hidden = true;
+    linkTool.setAttribute("aria-expanded", "false");
+    linkUrl.value = "";
+    linkText.value = "";
+    linkRange = null;
     permission.checked = Boolean(text?.permissionConfirmed);
     editor.replaceChildren(textFragment(text?.html || ""));
     editor.contentEditable = "true";
@@ -98,7 +108,7 @@ export async function createFeaturedAdmin() {
       const heading = document.createElement("h3");
       heading.textContent = text.title;
       const credit = document.createElement("p");
-      credit.textContent = `${ENTRY_KINDS[text.kind]} · Por ${text.author} · ${publicationDate(text.publishedAt)} · ${wordCount(text.html).toLocaleString("es-419")} palabras`;
+      credit.textContent = `${text.author ? `Por ${text.author} · ` : ""}${publicationDate(text.publishedAt)} · ${wordCount(text.html).toLocaleString("es-419")} palabras`;
       const actions = document.createElement("div");
       actions.className = "button-row";
       const edit = document.createElement("button");
@@ -201,7 +211,33 @@ export async function createFeaturedAdmin() {
         imageRange = selection.rangeCount && editor.contains(selection.anchorNode) ? selection.getRangeAt(0).cloneRange() : null;
         imagePanel.hidden = !imagePanel.hidden;
         imageTool.setAttribute("aria-expanded", String(!imagePanel.hidden));
-        if (!imagePanel.hidden) imageFile.focus();
+        if (!imagePanel.hidden) {
+          linkPanel.hidden = true;
+          linkTool.setAttribute("aria-expanded", "false");
+          imageFile.focus();
+        }
+        return;
+      }
+      if (button === linkTool) {
+        const selection = window.getSelection();
+        const inEditor = selection?.rangeCount && editor.contains(selection.anchorNode) && editor.contains(selection.focusNode);
+        linkRange = inEditor ? selection.getRangeAt(0).cloneRange() : null;
+        const anchor = inEditor ? (selection.anchorNode.nodeType === Node.ELEMENT_NODE ? selection.anchorNode : selection.anchorNode.parentElement).closest("a") : null;
+        if (anchor && editor.contains(anchor) && anchor.contains(selection.focusNode)) {
+          linkRange.selectNode(anchor);
+          linkUrl.value = anchor.getAttribute("href");
+          linkText.value = anchor.textContent;
+        } else {
+          linkUrl.value = "";
+          linkText.value = linkRange?.toString() || "";
+        }
+        linkPanel.hidden = !linkPanel.hidden;
+        linkTool.setAttribute("aria-expanded", String(!linkPanel.hidden));
+        if (!linkPanel.hidden) {
+          imagePanel.hidden = true;
+          imageTool.setAttribute("aria-expanded", "false");
+          linkUrl.focus();
+        }
         return;
       }
       editor.focus();
@@ -209,6 +245,50 @@ export async function createFeaturedAdmin() {
       markChanged();
       updateToolbar();
     });
+  });
+  document.querySelector("#cancel-inline-link").addEventListener("click", () => {
+    linkPanel.hidden = true;
+    linkTool.setAttribute("aria-expanded", "false");
+    linkRange = null;
+    linkTool.focus();
+  });
+  document.querySelector("#insert-inline-link").addEventListener("click", () => {
+    const href = externalLink(linkUrl.value);
+    const label = linkText.value.trim();
+    if (!href || !label || label.length > 500) {
+      status.textContent = "Indica una dirección http:// o https:// sin credenciales y un texto de enlace de entre 1 y 500 caracteres.";
+      const invalid = !href ? linkUrl : linkText;
+      invalid.setAttribute("aria-invalid", "true");
+      invalid.focus();
+      return;
+    }
+    try {
+      editor.focus();
+      const range = linkRange && editor.contains(linkRange.commonAncestorContainer) ? linkRange : document.createRange();
+      if (range !== linkRange) { range.selectNodeContents(editor); range.collapse(false); }
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      let inserted;
+      if (!range.collapsed && range.toString() === label) inserted = document.execCommand("createLink", false, href);
+      else {
+        const link = document.createElement("a");
+        link.href = href;
+        link.textContent = label;
+        inserted = document.execCommand("insertHTML", false, link.outerHTML);
+      }
+      if (!inserted) throw new Error("No se pudo insertar el enlace en el editor.");
+      editor.querySelectorAll("a").forEach((link) => { link.target = "_blank"; link.rel = "noopener noreferrer"; });
+      linkPanel.hidden = true;
+      linkTool.setAttribute("aria-expanded", "false");
+      linkRange = null;
+      linkPanel.querySelectorAll("[aria-invalid]").forEach((node) => node.removeAttribute("aria-invalid"));
+      markChanged();
+      updateToolbar();
+      status.textContent = "Enlace insertado. Abrirá una nueva pestaña al leer la publicación.";
+    } catch (error) {
+      status.textContent = `No se insertó el enlace. ${error.message}`;
+    }
   });
   document.querySelector("#cancel-inline-image").addEventListener("click", () => {
       imagePanel.hidden = true;
@@ -284,7 +364,7 @@ export async function createFeaturedAdmin() {
       if (!title.value.trim()) title.value = file.name.replace(/\.[^.]+$/u, "").slice(0, 150);
       permission.checked = false;
       markChanged();
-      status.textContent = "Archivo cargado. Revisa el formato, acredita la autoría y confirma el permiso antes de guardar. Se eliminaron estilos, enlaces y elementos no admitidos.";
+      status.textContent = "Archivo cargado. Revisa el formato, acredita la autoría cuando corresponda y confirma el permiso antes de guardar. Se conservaron los enlaces http:// o https:// y se eliminaron estilos y elementos no admitidos.";
       if (warnings.length) status.textContent += ` Avisos de conversión: ${warnings.join(" ")}`;
     } catch (error) {
       status.textContent = `No se cargó el archivo. ${error.message} Los relatos guardados no se modificaron.`;
@@ -304,9 +384,9 @@ export async function createFeaturedAdmin() {
       if (editingId && JSON.stringify(latest.find((text) => text.id === editingId)) !== original) throw new Error("Este texto cambió en otra pestaña. Recarga antes de guardar para no sobrescribirlo.");
       const text = validateFeaturedText({
         version: 1, id: editingId || crypto.randomUUID(), title: title.value,
-        author: author.value, html: editor.innerHTML, permissionConfirmed: permission.checked,
+        author: author.value, authorUrl: authorUrl.value, html: editor.innerHTML, permissionConfirmed: permission.checked,
         coverImage: cover.read(),
-        kind: kind.value, publishedAt: editingId ? latest.find((item) => item.id === editingId).publishedAt || new Date().toISOString() : new Date().toISOString(),
+        publishedAt: editingId ? latest.find((item) => item.id === editingId).publishedAt || new Date().toISOString() : new Date().toISOString(),
       });
       const saved = await persistShowcase(editingId ? latest.map((item) => item.id === editingId ? text : item) : [text, ...latest]);
       fillEditor(saved.find((item) => item.id === text.id));
@@ -314,7 +394,7 @@ export async function createFeaturedAdmin() {
       status.textContent = `Texto y crédito de autoría guardados ${storageLocation}. Su ficha y su lectura completa se actualizaron.`;
     } catch (error) {
       panel.inert = false;
-      const invalid = title.value.trim().length < 2 ? title : !author.value.trim() ? author : !editor.textContent.trim() ? editor : !permission.checked ? permission : null;
+      const invalid = title.value.trim().length < 2 ? title : author.value.trim().length > 150 || (authorUrl.value.trim() && !author.value.trim()) ? author : authorUrl.value.trim() && !externalLink(authorUrl.value) ? authorUrl : !editor.textContent.trim() ? editor : !permission.checked ? permission : null;
       if (invalid) {
         invalid.setAttribute("aria-invalid", "true");
         invalid.focus();

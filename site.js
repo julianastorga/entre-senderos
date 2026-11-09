@@ -322,7 +322,7 @@ document.querySelectorAll("[data-preview-form]").forEach((form) => {
 
 const calendar = createCalendar();
 const admin = canAdminister ? createAdmin(refreshWorkshops) : null;
-await initFeaturedView(contentStorage, refreshShowcase, CLOUD_MODE, async (path) => (await apiRequest(`editorial${path}`)).value);
+await initFeaturedView(contentStorage, refreshShowcase, CLOUD_MODE, async (path, options) => (await apiRequest(`editorial${path}`, options)).value);
 if (canAdminister) await createFeaturedAdmin();
 if (canAdminister) await createSettingsAdmin();
 

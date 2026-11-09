@@ -101,15 +101,120 @@ test("public Editorial pages contain only selected card metadata and publication
   assert.equal(saved.status, 200);
   assert.ok(saved.body.texts.every((item) => item.publishedAt !== texts[0].publishedAt));
   const page = await api(request("editorial", "GET", null, {}, { tipo: "post", pagina: "2" }));
-  assert.equal(page.body.total, 8);
-  assert.equal(page.body.items.length, 2);
-  assert.ok(page.body.items.every((item) => item.kind === "post" && !Object.hasOwn(item, "html")));
+  assert.equal(page.body.total, 15);
+  assert.equal(page.body.items.length, 6);
+  assert.ok(page.body.items.every((item) => !Object.hasOwn(item, "kind") && !Object.hasOwn(item, "html")));
   assert.equal(page.body.items[0].excerpt, "Una historia & otra. Final.");
   assert.equal((await api(request("editorial/entry", "GET", null, {}, { id: "blog-0" }))).body.text.html, texts[0].html);
   assert.equal((await api(request("editorial/entry", "GET", null, {}, { id: "missing" }))).status, 404);
   const originalDate = saved.body.texts[0].publishedAt;
   const edited = await api(request("showcase", "PUT", { version: 1, texts: [{ ...saved.body.texts[0], publishedAt: texts[0].publishedAt }] }, { ...admin, "if-match": saved.headers.ETag }));
   assert.equal(edited.body.texts[0].publishedAt, originalDate);
+});
+
+test("author credits and embedded links survive publication while unsafe destinations and attributes are removed", async () => {
+  const { api } = create();
+  const text = {
+    version: 1, id: "linked", title: "Lecturas compartidas", author: "Autora invitada",
+    authorUrl: "https://blog.example.org", permissionConfirmed: true, kind: "participant",
+    html: '<p><a href="https://blog.example.org/lectura?q=1&amp;x=2" target="_self" onclick="alert(1)" style="color:red">Blog <strong>invitado</strong></a> <a href="javascript:alert(1)">No ejecutar</a> <a href="//blog.example.org">Sin protocolo</a> <a href="https://user:password@blog.example.org">Sin credenciales</a></p>',
+  };
+  const saved = await api(request("showcase", "PUT", { version: 1, texts: [text] }, admin));
+  assert.equal(saved.status, 200);
+  const entry = saved.body.texts[0];
+  assert.equal(entry.authorUrl, "https://blog.example.org/");
+  assert.equal(Object.hasOwn(entry, "kind"), false);
+  assert.equal(entry.html, '<p><a href="https://blog.example.org/lectura?q=1&amp;x=2" target="_blank" rel="noopener noreferrer">Blog <strong>invitado</strong></a> No ejecutar Sin protocolo Sin credenciales</p>');
+  const card = (await api(request("editorial"))).body.items[0];
+  assert.equal(card.author, text.author);
+  assert.equal(card.authorUrl, entry.authorUrl);
+  assert.equal((await api(request("editorial/entry", "GET", null, {}, { id: text.id }))).body.text.html, entry.html);
+  const { authorUrl: omittedUrl, ...legacyClientEntry } = entry;
+  const preserved = await api(request("showcase", "PUT", { version: 1, texts: [legacyClientEntry] }, { ...admin, "if-match": saved.headers.ETag }));
+  assert.equal(preserved.body.texts[0].authorUrl, omittedUrl, "an older cached editor must not strip author websites from unchanged credits");
+  const headers = { ...admin, "if-match": preserved.headers.ETag };
+  assert.equal((await api(request("showcase", "PUT", { version: 1, texts: [{ ...legacyClientEntry, author: "Otro crédito" }] }, headers))).status, 409);
+  for (const invalid of [{ author: "", authorUrl: text.authorUrl }, { authorUrl: "javascript:alert(1)" }, { authorUrl: "https://user:password@blog.example.org" }]) {
+    assert.equal((await api(request("showcase", "PUT", { version: 1, texts: [{ ...entry, ...invalid }] }, headers))).status, 400);
+  }
+  const noCredit = await api(request("showcase", "PUT", { version: 1, texts: [{ ...entry, author: "", authorUrl: "" }] }, headers));
+  assert.equal(noCredit.status, 200);
+  assert.equal(noCredit.body.texts[0].publishedAt, entry.publishedAt);
+});
+
+test("anonymous reactions persist per browser, toggle independently and use idempotent desired-state writes", async () => {
+  const { api, store } = create();
+  const query = { id: "ejemplo" };
+  const first = await api(request("editorial/reactions", "GET", null, {}, query));
+  const cookie = first.headers["Set-Cookie"].split(";")[0];
+  assert.match(first.headers["Set-Cookie"], /; Path=\/; HttpOnly; Secure; SameSite=Lax;/u);
+  assert.equal(first.headers["Cache-Control"], "no-store");
+  assert.deepEqual(first.body.selected, []);
+  const change = (reaction, active, browser = cookie) => api(request("editorial/reactions", "PUT", { reaction, active }, { cookie: browser }, query));
+  const liked = await change("heart", true);
+  assert.equal(liked.body.counts.heart, 1);
+  assert.deepEqual(liked.body.selected, ["heart"]);
+  const version = store.data.get("reactions/ejemplo").version;
+  assert.equal((await change("heart", true)).body.counts.heart, 1);
+  assert.equal(store.data.get("reactions/ejemplo").version, version, "retrying a desired state must not add another vote");
+  await change("fire", true);
+  const removed = await change("heart", false);
+  assert.equal(removed.body.counts.heart, 0);
+  assert.equal(removed.body.counts.fire, 1);
+  const reload = await api(request("editorial/reactions", "GET", null, { cookie }, query));
+  assert.deepEqual(reload.body.selected, ["fire"]);
+  assert.equal(Object.hasOwn(reload.body, "voters"), false);
+  assert.ok(!JSON.stringify(reload.body).includes(cookie.split("=")[1]));
+  const other = await api(request("editorial/reactions", "GET", null, {}, query));
+  assert.deepEqual(other.body.selected, []);
+  assert.equal(other.body.counts.fire, 1);
+  assert.equal((await change("fire", true, other.headers["Set-Cookie"].split(";")[0])).body.counts.fire, 2);
+});
+
+test("concurrent reactions merge without lost counts or overwriting blog content", async () => {
+  const { api, store } = create();
+  const query = { id: "ejemplo" };
+  const browser = async () => (await api(request("editorial/reactions", "GET", null, {}, query))).headers["Set-Cookie"].split(";")[0];
+  const [first, second] = await Promise.all([browser(), browser()]);
+  const results = await Promise.all([
+    api(request("editorial/reactions", "PUT", { reaction: "heart", active: true }, { cookie: first }, query)),
+    api(request("editorial/reactions", "PUT", { reaction: "heart", active: true }, { cookie: second }, query)),
+    api(request("editorial/reactions", "PUT", { reaction: "applause", active: true }, { cookie: first }, query)),
+  ]);
+  assert.ok(results.every((result) => result.status === 200));
+  const state = await api(request("editorial/reactions", "GET", null, { cookie: first }, query));
+  assert.equal(state.body.counts.heart, 2);
+  assert.equal(state.body.counts.applause, 1);
+  assert.deepEqual(state.body.selected.sort(), ["applause", "heart"]);
+  assert.equal(store.data.has("showcase"), false);
+  store.write = async () => { const error = new Error("Conflict"); error.statusCode = 412; throw error; };
+  const conflict = await api(request("editorial/reactions", "PUT", { reaction: "heart", active: false }, { cookie: first }, query));
+  assert.equal(conflict.status, 409);
+  assert.equal((await api(request("editorial/reactions", "GET", null, { cookie: first }, query))).body.counts.heart, 2);
+});
+
+test("reaction writes reject invalid input, cross-site requests, unavailable posts and rate-limited attempts", async () => {
+  const { api, store } = create();
+  const query = { id: "ejemplo" };
+  for (const body of [{ reaction: "unknown", active: true }, { reaction: "heart", active: "true" }, { reaction: "heart", active: true, extra: "x".repeat(501) }, null]) {
+    assert.equal((await api(request("editorial/reactions", "PUT", body, {}, query))).status, 400);
+  }
+  assert.equal((await api(request("editorial/reactions", "PUT", { reaction: "heart", active: true }, { "content-type": "text/plain" }, query))).status, 415);
+  assert.equal((await api(request("editorial/reactions", "PUT", { reaction: "heart", active: true }, { "sec-fetch-site": "cross-site" }, query))).status, 403);
+  assert.equal((await api(request("editorial/reactions", "POST", {}, {}, query))).status, 405);
+  assert.equal((await api(request("editorial/reactions", "GET", null, {}, { id: "../showcase" }))).status, 400);
+  assert.equal((await api(request("editorial/reactions", "GET", null, {}, { id: "deleted" }))).status, 404);
+  store.limited = true;
+  assert.equal((await api(request("editorial/reactions", "PUT", { reaction: "heart", active: true }, {}, query))).status, 429);
+  assert.equal(store.data.size, 0);
+  store.limited = false;
+  const text = { version: 1, id: "published", title: "Una publicación", html: "<p>Una lectura.</p>", permissionConfirmed: true };
+  const saved = await api(request("showcase", "PUT", { version: 1, texts: [text] }, admin));
+  assert.equal(saved.status, 200);
+  assert.equal((await api(request("editorial/reactions", "GET", null, {}, query))).status, 404, "the demo is not a real post when the blog has publications");
+  assert.equal((await api(request("editorial/reactions", "GET", null, {}, { id: text.id }))).status, 200);
+  await api(request("showcase", "PUT", { version: 1, texts: [] }, { ...admin, "if-match": saved.headers.ETag }));
+  assert.equal((await api(request("editorial/reactions", "PUT", { reaction: "heart", active: true }, {}, { id: text.id }))).status, 404);
 });
 
 test("managed images require authenticated uploads, bounded valid bytes and accessible covers; contacts use conditional writes", async () => {

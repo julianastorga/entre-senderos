@@ -53,7 +53,7 @@ const frontend = [
   "featured-admin.mjs", "text-import.mjs", "content-store.mjs", "email-validation.mjs", "image-model.mjs", "image-upload.mjs",
   "catalog-model.mjs", "offering-admin.mjs", "contact-model.mjs", "contact-settings.mjs",
   "admin-settings.mjs", "newsletter-actions.mjs",
-  "editorial-model.mjs",
+  "editorial-model.mjs", "reaction-model.mjs", "reactions.mjs",
   ...(await readdir(root)).filter((name) => name.endsWith(".html")),
 ];
 for (const file of frontend) await copyFile(target(file), target("dist", file));
