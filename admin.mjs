@@ -95,7 +95,7 @@ export function createAdmin(onSaved) {
       if (file.size > 10_000_000) throw new Error("El archivo supera 10 MB.");
       const data = JSON.parse(await file.text());
       const catalog = data.version === 1 ? migrateWorkshops(validateCatalog(data)) : validateCatalogV2(data);
-      if (!confirm(`¿Reemplazar talleres, ediciones y servicios ${storageLocation} por esta copia? Exporta antes para conservar la configuración actual. Las inscripciones y Editorial no se modifican.`)) return;
+      if (!confirm(`¿Reemplazar talleres, ediciones y servicios ${storageLocation} por esta copia? Exporta antes para conservar la configuración actual. Las inscripciones y el blog no se modifican.`)) return;
       await refreshCatalog(); await persistCatalog(catalog); reset(); await onSaved();
       backupStatus.textContent = "Catálogo importado.";
     } catch (error) { backupStatus.textContent = `No se importó el catálogo. ${error.message}`; }

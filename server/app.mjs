@@ -10,7 +10,7 @@ import { validateContacts, DEFAULT_CONTACTS } from "../contact-model.mjs";
 import { MailError, MAIL_OAUTH_COOKIE } from "./mail-service.mjs";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { decodeHTML } from "entities";
-import { editorialPage, externalLink } from "../editorial-model.mjs";
+import { editorialPage, externalLink, postMetadata } from "../editorial-model.mjs";
 import { REACTIONS, emptyReactions, reactionSummary, setReaction } from "../reaction-model.mjs";
 
 const newsletterCookie = "__Secure-entre_senderos_newsletter";
@@ -247,17 +247,18 @@ export function createApi({
         const texts = validateShowcase(collection.value, { sanitize: sanitizeStory, countWords: countStoryWords, allowDataImages: false });
         if (path === "editorial/entry") {
           if (!texts.length && (!req.query?.id || req.query.id === "ejemplo")) return response(200, { example: true });
-          const text = req.query?.id ? texts.find((item) => item.id === req.query.id) : editorialPage(texts).items[0];
+          const text = req.query?.id ? texts.find((item) => item.id === req.query.id) : editorialPage(texts).featured;
           if (!text) throw new HttpError(404, "Esta publicación ya no está disponible.");
           return response(200, { text });
         }
-        const page = editorialPage(texts, { page: req.query?.pagina });
-        return response(200, { ...page, example: !texts.length, items: page.items.map(({ html, permissionConfirmed, ...text }) => {
+        const page = editorialPage(texts, { page: req.query?.pagina, tag: req.query?.etiqueta });
+        function summarize({ html, permissionConfirmed, ...text }) {
           const words = storyText(html).split(/\s+/u);
           const count = countStoryWords(html);
           const minutes = Math.max(1, Math.ceil(count / 200));
           return { ...text, excerpt: words.slice(0, 40).join(" ") + (words.length > 40 ? "…" : ""), meta: `${count.toLocaleString("es-419")} palabras · ${minutes} ${minutes === 1 ? "minuto" : "minutos"} de lectura` };
-        }) });
+        }
+        return response(200, { ...page, example: !texts.length, featured: page.featured ? summarize(page.featured) : null, items: page.items.map(summarize) });
       }
       if (path === "settings/contacts") {
         if (method === "GET") {
@@ -339,6 +340,10 @@ export function createApi({
             const input = req.body.texts.find((item) => item.id === text.id);
             const previousUrl = externalLink(previous?.authorUrl) || "";
             if (input.authorUrl === undefined && previousUrl && text.author !== previous.author) throw new HttpError(409, "Recarga el editor antes de cambiar una autoría con blog. No se guardaron cambios.");
+            const previousMetadata = previous ? postMetadata(previous) : null;
+            for (const field of ["subtitle", "tags"]) {
+              if (input[field] === undefined && previousMetadata) text[field] = previousMetadata[field];
+            }
             return { ...text, authorUrl: input.authorUrl === undefined ? previousUrl || text.authorUrl : text.authorUrl, publishedAt: previous?.publishedAt || new Date().toISOString() };
           });
         }

@@ -1,30 +1,68 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { authorCredit, externalLink, editorialPage, publicationMetadata, publicationDate } from "../editorial-model.mjs";
+import { authorCredit, externalLink, editorialPage, postMetadata, publicationMetadata, publicationDate } from "../editorial-model.mjs";
 
 const entries = Array.from({ length: 19 }, (_, index) => ({ id: `entry-${String(index).padStart(2, "0")}`, kind: index % 2 ? "post" : "participant", publishedAt: `2026-03-${String(index + 1).padStart(2, "0")}T04:30:00.000Z` }));
 
-test("the unified Editorial sorts all legacy kinds together into disjoint bounded pages", () => {
+test("the blog features the latest post and paginates all previous legacy kinds without duplicates", () => {
   const first = editorialPage(entries);
   const second = editorialPage(entries, { page: 2 });
   assert.equal(first.items.length, 6);
-  assert.equal(first.pages, 4);
-  assert.equal(first.items[0].id, "entry-18");
+  assert.equal(first.pages, 3);
+  assert.equal(first.featured.id, "entry-18");
+  assert.equal(first.items[0].id, "entry-17");
+  assert.equal(first.archiveTotal, 18);
+  assert.deepEqual(second.featured, first.featured);
+  const all = [first.featured, ...first.items, ...second.items, ...editorialPage(entries, { page: 3 }).items];
+  assert.equal(new Set(all.map((item) => item.id)).size, entries.length);
   assert.equal(new Set([...first.items, ...second.items].map((item) => item.id)).size, 12);
   const legacyQuery = editorialPage(entries, { kind: "post", page: 2 });
   assert.equal(legacyQuery.total, 19);
-  assert.equal(legacyQuery.pages, 4);
+  assert.equal(legacyQuery.pages, 3);
   assert.deepEqual(legacyQuery.items, second.items);
   assert.ok(!Object.hasOwn(legacyQuery, "kind"));
-  assert.equal(editorialPage(entries, { kind: "participant", page: 999 }).page, 4);
+  assert.equal(editorialPage(entries, { kind: "participant", page: 999 }).page, 3);
 });
 
 test("invalid pages normalize safely, ties are deterministic, and an empty blog never produces page zero", () => {
   for (const page of [0, -1, "2bad", "1.5", Infinity, "90071992547409999", "01"]) assert.equal(editorialPage(entries, { page }).page, 1);
   assert.equal(editorialPage([], { page: 3 }).page, 1);
   assert.equal(editorialPage([], { page: 3 }).pages, 1);
+  assert.equal(editorialPage([]).featured, null);
+  assert.equal(editorialPage([entries[0]]).archiveTotal, 0);
+  assert.deepEqual(editorialPage([entries[0]], { page: 999 }).items, []);
   const tied = [{ id: "b", kind: "post", publishedAt: null }, { id: "a", kind: "post", publishedAt: null }];
-  assert.deepEqual(editorialPage(tied).items.map((item) => item.id), ["a", "b"]);
+  assert.equal(editorialPage(tied).featured.id, "a");
+  assert.deepEqual(editorialPage(tied).items.map((item) => item.id), ["b"]);
+});
+
+test("tag filtering features the newest match and keeps global per-post cloud counts across pages", () => {
+  const tagged = entries.map((entry, index) => ({ ...entry, tags: index % 2 ? ["Poesía", "Lecturas"] : ["Lecturas"] }));
+  tagged[1].tags.push("POESI\u0301A");
+  const filtered = editorialPage(tagged, { tag: "  POESI\u0301A  ", page: 999 });
+  assert.equal(filtered.tag, "poesía");
+  assert.equal(filtered.featured.id, "entry-17");
+  assert.equal(filtered.page, 2);
+  assert.equal(filtered.pages, 2);
+  assert.equal(filtered.total, 9);
+  assert.equal(filtered.archiveTotal, 8);
+  assert.equal(filtered.allTotal, 19);
+  assert.deepEqual(filtered.items.map((item) => item.id), ["entry-03", "entry-01"]);
+  assert.deepEqual(filtered.tags, [{ key: "lecturas", name: "Lecturas", count: 19 }, { key: "poesía", name: "Poesía", count: 9 }]);
+  const missing = editorialPage(tagged, { tag: "Sin coincidencias", page: 3 });
+  assert.equal(missing.featured, null);
+  assert.equal(missing.total, 0);
+  assert.equal(missing.page, 1);
+  assert.deepEqual(missing.items, []);
+  assert.deepEqual(missing.tags, filtered.tags);
+});
+
+test("subtitle and tag validation preserves legacy posts and normalizes bounded editable metadata", () => {
+  assert.deepEqual(postMetadata({}), { subtitle: "", tags: [] });
+  assert.deepEqual(postMetadata({ subtitle: " Un subtítulo ", tags: [" Poesía ", "POESI\u0301A", "Escritura  creativa"] }), { subtitle: "Un subtítulo", tags: ["Poesía", "Escritura creativa"] });
+  for (const input of [{ subtitle: 42 }, { subtitle: "x".repeat(301) }, { tags: "Poesía" }, { tags: Array(11).fill("tag") }, { tags: [42] }, { tags: [""] }, { tags: ["x".repeat(41)] }, { tags: ["uno,dos"] }, { tags: ["una\netiqueta"] }]) {
+    assert.throws(() => postMetadata(input));
+  }
 });
 
 test("old categories are ignored and publication time crosses the UTC date boundary in Costa Rica", () => {

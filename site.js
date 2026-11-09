@@ -371,7 +371,7 @@ if (adminTabs && canAdminister) {
     if (focus) tab.focus();
   }
   adminTabs.hidden = false;
-  const requestedHash = ["#muestra", "#featured-text-admin"].includes(location.hash) ? "editorial" : location.hash.slice(1);
+  const requestedHash = ["#muestra", "#featured-text-admin", "#editorial"].includes(location.hash) ? "blog" : location.hash.slice(1);
   selectTab(tabs.find((tab) => tab.dataset.tabHash === requestedHash) || tabs[0]);
   tabs.forEach((tab, index) => {
     tab.addEventListener("click", () => {

@@ -14,6 +14,8 @@ export async function createFeaturedAdmin() {
   const fields = document.querySelector("#featured-text-fields");
   const editor = document.querySelector("#text-editor");
   const title = document.querySelector("#text-title");
+  const subtitle = document.querySelector("#text-subtitle");
+  const tags = document.querySelector("#text-tags");
   const author = document.querySelector("#text-author");
   const authorUrl = document.querySelector("#text-author-url");
   const permission = document.querySelector("#text-permission");
@@ -67,6 +69,8 @@ export async function createFeaturedAdmin() {
     editingId = text?.id || null;
     original = text ? JSON.stringify(text) : null;
     title.value = text?.title || "";
+    subtitle.value = text?.subtitle || "";
+    tags.value = (text?.tags || []).join(", ");
     author.value = text?.author || "";
     authorUrl.value = text?.authorUrl || "";
     document.querySelector("#text-publication-date").textContent = text ? publicationDate(text.publishedAt) : "Se publicará con la fecha y hora de Costa Rica al guardar.";
@@ -98,7 +102,7 @@ export async function createFeaturedAdmin() {
     if (!texts.length) {
       const empty = document.createElement("p");
       empty.className = "empty-state";
-      empty.textContent = "Todavía no hay textos guardados. Editorial enseña el relato de ejemplo.";
+      empty.textContent = "Todavía no hay textos guardados. El blog enseña el relato de ejemplo.";
       list.append(empty);
     }
     texts.forEach((text) => {
@@ -133,7 +137,7 @@ export async function createFeaturedAdmin() {
       remove.textContent = "Eliminar";
       remove.setAttribute("aria-label", `Eliminar texto: ${text.title}`);
       remove.addEventListener("click", async () => {
-        if (!window.confirm(`¿Eliminar «${text.title}» de Editorial ${storageLocation}?`)) return;
+        if (!window.confirm(`¿Eliminar «${text.title}» del blog ${storageLocation}?`)) return;
         panel.inert = true;
         try {
           await refreshShowcase();
@@ -142,7 +146,7 @@ export async function createFeaturedAdmin() {
           const saved = await persistShowcase(latest.filter((item) => item.id !== text.id));
           if (editingId === text.id) fillEditor();
           renderList(saved);
-          status.textContent = "Texto eliminado de Editorial. Los demás relatos no se modificaron.";
+          status.textContent = "Texto eliminado del blog. Los demás relatos no se modificaron.";
         } catch (error) {
           status.textContent = `No se eliminó el texto. ${error.message}`;
         } finally {
@@ -168,13 +172,13 @@ export async function createFeaturedAdmin() {
       editor.contentEditable = "false";
       fields.disabled = true;
       list.replaceChildren();
-      status.textContent = `No se pudo cargar Editorial. ${error.message} No se sobrescribió ningún dato. Puedes restablecer el ejemplo para recuperar este espacio.`;
+      status.textContent = `No se pudo cargar el blog. ${error.message} No se sobrescribió ningún dato. Puedes restablecer el ejemplo para recuperar este espacio.`;
     }
   }
   function markChanged() {
     editorRevision += 1;
     dirty = true;
-    status.textContent = "Hay cambios sin guardar. Editorial todavía no se ha actualizado.";
+    status.textContent = "Hay cambios sin guardar. El blog todavía no se ha actualizado.";
     updateCount();
   }
   window.addEventListener("beforeunload", (event) => {
@@ -384,6 +388,7 @@ export async function createFeaturedAdmin() {
       if (editingId && JSON.stringify(latest.find((text) => text.id === editingId)) !== original) throw new Error("Este texto cambió en otra pestaña. Recarga antes de guardar para no sobrescribirlo.");
       const text = validateFeaturedText({
         version: 1, id: editingId || crypto.randomUUID(), title: title.value,
+        subtitle: subtitle.value, tags: tags.value.split(",").map((tag) => tag.trim()).filter(Boolean),
         author: author.value, authorUrl: authorUrl.value, html: editor.innerHTML, permissionConfirmed: permission.checked,
         coverImage: cover.read(),
         publishedAt: editingId ? latest.find((item) => item.id === editingId).publishedAt || new Date().toISOString() : new Date().toISOString(),
@@ -394,7 +399,7 @@ export async function createFeaturedAdmin() {
       status.textContent = `Texto y crédito de autoría guardados ${storageLocation}. Su ficha y su lectura completa se actualizaron.`;
     } catch (error) {
       panel.inert = false;
-      const invalid = title.value.trim().length < 2 ? title : author.value.trim().length > 150 || (authorUrl.value.trim() && !author.value.trim()) ? author : authorUrl.value.trim() && !externalLink(authorUrl.value) ? authorUrl : !editor.textContent.trim() ? editor : !permission.checked ? permission : null;
+      const invalid = title.value.trim().length < 2 ? title : subtitle.value.trim().length > 300 ? subtitle : /etiqueta/iu.test(error.message) ? tags : author.value.trim().length > 150 || (authorUrl.value.trim() && !author.value.trim()) ? author : authorUrl.value.trim() && !externalLink(authorUrl.value) ? authorUrl : !editor.textContent.trim() ? editor : !permission.checked ? permission : null;
       if (invalid) {
         invalid.setAttribute("aria-invalid", "true");
         invalid.focus();
@@ -405,7 +410,7 @@ export async function createFeaturedAdmin() {
     }
   });
   document.querySelector("#reset-featured-text").addEventListener("click", async () => {
-    if (!window.confirm(`¿Quitar todos los textos de Editorial ${storageLocation} y volver al relato de ejemplo? También se descartarán los cambios del editor.`)) return;
+    if (!window.confirm(`¿Quitar todos los textos del blog ${storageLocation} y volver al relato de ejemplo? También se descartarán los cambios del editor.`)) return;
     panel.inert = true;
     try {
       await refreshShowcase();
@@ -415,19 +420,19 @@ export async function createFeaturedAdmin() {
       await loadState();
       status.textContent = "Se restableció el relato de ejemplo. No se modificó el catálogo de talleres.";
     } catch (error) {
-      status.textContent = `No se pudo restablecer Editorial. ${error.message}`;
+      status.textContent = `No se pudo restablecer el blog. ${error.message}`;
     } finally {
       panel.inert = false;
     }
   });
   await loadState();
   window.addEventListener("content-changed", () => {
-    if (dirty) status.textContent = "Editorial cambió en otra sesión. Conservamos tus cambios; comprobaremos este relato antes de guardar.";
+    if (dirty) status.textContent = "El blog cambió en otra sesión. Conservamos tus cambios; comprobaremos este relato antes de guardar.";
     else loadState();
   });
   window.addEventListener("storage", (event) => {
     if (![SHOWCASE_KEY, LEGACY_TEXT_KEY, null].includes(event.key)) return;
-    if (dirty) status.textContent = "Editorial cambió en otra pestaña. Conservamos tus cambios en el editor; al guardar comprobaremos que este relato no haya cambiado.";
+    if (dirty) status.textContent = "El blog cambió en otra pestaña. Conservamos tus cambios en el editor; al guardar comprobaremos que este relato no haya cambiado.";
     else loadState();
   });
 }

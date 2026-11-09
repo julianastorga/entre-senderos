@@ -124,7 +124,7 @@ test("workshop sections are shared and validated, and older edition editors cann
   assert.equal(cleared.body.programs[0].modality, catalog.programs[0].modality);
 });
 
-test("public Editorial pages contain only selected card metadata and publication dates are assigned by the server", async () => {
+test("public blog pages summarize both the latest and archived posts and assign publication dates on the server", async () => {
   const { api } = create();
   const texts = Array.from({ length: 15 }, (_, index) => ({ version: 1, id: `blog-${index}`, title: `Entrada ${index}`, author: "Autoría", permissionConfirmed: true, kind: index < 8 ? "post" : "participant", html: "<p>Una historia &amp; otra.</p><p>Final.</p>", publishedAt: "2020-01-01T00:00:00.000Z" }));
   const saved = await api(request("showcase", "PUT", { version: 1, texts }, admin));
@@ -133,8 +133,11 @@ test("public Editorial pages contain only selected card metadata and publication
   const page = await api(request("editorial", "GET", null, {}, { tipo: "post", pagina: "2" }));
   assert.equal(page.body.total, 15);
   assert.equal(page.body.items.length, 6);
-  assert.ok(page.body.items.every((item) => !Object.hasOwn(item, "kind") && !Object.hasOwn(item, "html")));
+  assert.equal(page.body.archiveTotal, 14);
+  assert.ok([page.body.featured, ...page.body.items].every((item) => !Object.hasOwn(item, "kind") && !Object.hasOwn(item, "html") && !Object.hasOwn(item, "permissionConfirmed")));
+  assert.ok(!page.body.items.some((item) => item.id === page.body.featured.id));
   assert.equal(page.body.items[0].excerpt, "Una historia & otra. Final.");
+  assert.equal((await api(request("editorial/entry"))).body.text.id, page.body.featured.id);
   assert.equal((await api(request("editorial/entry", "GET", null, {}, { id: "blog-0" }))).body.text.html, texts[0].html);
   assert.equal((await api(request("editorial/entry", "GET", null, {}, { id: "missing" }))).status, 404);
   const originalDate = saved.body.texts[0].publishedAt;
@@ -155,7 +158,7 @@ test("author credits and embedded links survive publication while unsafe destina
   assert.equal(entry.authorUrl, "https://blog.example.org/");
   assert.equal(Object.hasOwn(entry, "kind"), false);
   assert.equal(entry.html, '<p><a href="https://blog.example.org/lectura?q=1&amp;x=2" target="_blank" rel="noopener noreferrer">Blog <strong>invitado</strong></a> No ejecutar Sin protocolo Sin credenciales</p>');
-  const card = (await api(request("editorial"))).body.items[0];
+  const card = (await api(request("editorial"))).body.featured;
   assert.equal(card.author, text.author);
   assert.equal(card.authorUrl, entry.authorUrl);
   assert.equal((await api(request("editorial/entry", "GET", null, {}, { id: text.id }))).body.text.html, entry.html);
@@ -170,6 +173,40 @@ test("author credits and embedded links survive publication while unsafe destina
   const noCredit = await api(request("showcase", "PUT", { version: 1, texts: [{ ...entry, author: "", authorUrl: "" }] }, headers));
   assert.equal(noCredit.status, 200);
   assert.equal(noCredit.body.texts[0].publishedAt, entry.publishedAt);
+});
+
+test("blog subtitles and tags survive saves, public filtering and older cached editors but can be explicitly cleared", async () => {
+  const { api } = create();
+  const text = { version: 1, id: "tagged", title: "Lecturas para compartir", subtitle: " Una invitación ", tags: [" Poesía ", "POESI\u0301A", "Lecturas"], permissionConfirmed: true, html: "<p>Texto completo con sus imágenes y enlaces.</p>" };
+  const saved = await api(request("showcase", "PUT", { version: 1, texts: [text] }, admin));
+  assert.equal(saved.status, 200);
+  const entry = saved.body.texts[0];
+  const filtered = (await api(request("editorial", "GET", null, {}, { etiqueta: "POESI\u0301A", pagina: "999" }))).body;
+  assert.equal(filtered.featured.subtitle, "Una invitación");
+  assert.deepEqual(filtered.featured.tags, ["Poesía", "Lecturas"]);
+  assert.equal(filtered.page, 1);
+  assert.equal(filtered.archiveTotal, 0);
+  assert.equal(Object.hasOwn(filtered.featured, "html"), false);
+  assert.equal((await api(request("editorial/entry", "GET", null, {}, { id: text.id }))).body.text.subtitle, entry.subtitle);
+  const missing = (await api(request("editorial", "GET", null, {}, { etiqueta: "Desconocida" }))).body;
+  assert.equal(missing.featured, null);
+  assert.deepEqual(missing.items, []);
+  assert.equal(missing.tags.length, 2);
+  const { subtitle, tags, ...oldClient } = entry;
+  const preserved = await api(request("showcase", "PUT", { version: 1, texts: [{ ...oldClient, title: "Título actualizado" }] }, { ...admin, "if-match": saved.headers.ETag }));
+  assert.equal(preserved.status, 200);
+  assert.equal(preserved.body.texts[0].subtitle, subtitle);
+  assert.deepEqual(preserved.body.texts[0].tags, tags);
+  const headers = { ...admin, "if-match": preserved.headers.ETag };
+  for (const invalid of [{ subtitle: "x".repeat(301) }, { tags: Array(11).fill("tema") }, { tags: "tema" }, { tags: ["x".repeat(41)] }]) {
+    assert.equal((await api(request("showcase", "PUT", { version: 1, texts: [{ ...entry, ...invalid }] }, headers))).status, 400);
+  }
+  const cleared = await api(request("showcase", "PUT", { version: 1, texts: [{ ...entry, subtitle: "", tags: [] }] }, headers));
+  assert.equal(cleared.status, 200);
+  assert.equal(cleared.body.texts[0].subtitle, "");
+  assert.deepEqual(cleared.body.texts[0].tags, []);
+  assert.equal(cleared.body.texts[0].publishedAt, entry.publishedAt);
+  assert.equal(cleared.body.texts[0].html, entry.html);
 });
 
 test("anonymous reactions persist per browser, toggle independently and use idempotent desired-state writes", async () => {

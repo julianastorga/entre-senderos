@@ -1,6 +1,27 @@
 export const EDITORIAL_TIME_ZONE = "America/Costa_Rica";
 export const EDITORIAL_PAGE_SIZE = 6;
 
+export function tagKey(value) {
+  return value.trim().replace(/\s+/gu, " ").normalize("NFC").toLocaleLowerCase("es");
+}
+
+export function postMetadata(input) {
+  if (input.subtitle != null && typeof input.subtitle !== "string") throw new Error("El subtítulo debe ser texto.");
+  const subtitle = (input.subtitle || "").trim();
+  if (subtitle.length > 300) throw new Error("El subtítulo admite hasta 300 caracteres.");
+  if (input.tags != null && !Array.isArray(input.tags)) throw new Error("Las etiquetas deben ser una lista.");
+  const tags = input.tags ?? [];
+  if (tags.length > 10) throw new Error("Cada publicación admite hasta 10 etiquetas.");
+  const unique = new Map();
+  for (const value of tags) {
+    if (typeof value !== "string" || /[,\u0000-\u001f\u007f]/u.test(value)) throw new Error("Cada etiqueta debe ser texto sin comas ni caracteres de control.");
+    const name = value.trim().replace(/\s+/gu, " ").normalize("NFC");
+    if (!name || name.length > 40) throw new Error("Cada etiqueta debe tener entre 1 y 40 caracteres.");
+    if (!unique.has(tagKey(name))) unique.set(tagKey(name), name);
+  }
+  return { subtitle, tags: [...unique.values()] };
+}
+
 export function externalLink(value) {
   if (typeof value !== "string") return null;
   const href = value.trim();
@@ -34,11 +55,27 @@ export function publicationDate(value) {
   return value ? new Intl.DateTimeFormat("es-CR", { dateStyle: "long", timeStyle: "short", timeZone: EDITORIAL_TIME_ZONE }).format(new Date(value)) + " · Costa Rica (UTC−6)" : "Fecha de publicación no registrada";
 }
 
-export function editorialPage(entries, { page = 1 } = {}) {
+export function editorialPage(entries, { page = 1, tag = "" } = {}) {
   const sorted = [...entries].sort((a, b) => (Date.parse(b.publishedAt) || 0) - (Date.parse(a.publishedAt) || 0) || a.id.localeCompare(b.id, "en"));
-  const pages = Math.max(1, Math.ceil(sorted.length / EDITORIAL_PAGE_SIZE));
+  const counts = new Map();
+  for (const entry of sorted) {
+    for (const name of new Set((entry.tags || []).map(tagKey))) {
+      const current = counts.get(name);
+      if (current) current.count += 1;
+      else counts.set(name, { key: name, name: entry.tags.find((item) => tagKey(item) === name), count: 1 });
+    }
+  }
+  const selectedTag = typeof tag === "string" ? tagKey(tag) : "";
+  const matching = selectedTag ? sorted.filter((entry) => (entry.tags || []).some((name) => tagKey(name) === selectedTag)) : sorted;
+  const [featured = null, ...archive] = matching;
+  const pages = Math.max(1, Math.ceil(archive.length / EDITORIAL_PAGE_SIZE));
   const requested = typeof page === "number" ? page : /^[1-9]\d*$/u.test(page) ? Number(page) : 1;
   const current = Math.min(pages, Number.isSafeInteger(requested) && requested > 0 ? requested : 1);
   const start = (current - 1) * EDITORIAL_PAGE_SIZE;
-  return { items: sorted.slice(start, start + EDITORIAL_PAGE_SIZE), page: current, pages, total: sorted.length, pageSize: EDITORIAL_PAGE_SIZE };
+  return {
+    featured, items: archive.slice(start, start + EDITORIAL_PAGE_SIZE),
+    page: current, pages, total: matching.length, archiveTotal: archive.length, allTotal: sorted.length,
+    pageSize: EDITORIAL_PAGE_SIZE, tag: selectedTag,
+    tags: [...counts.values()].sort((a, b) => a.name.localeCompare(b.name, "es", { sensitivity: "base" })),
+  };
 }
