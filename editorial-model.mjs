@@ -1,6 +1,28 @@
 export const EDITORIAL_TIME_ZONE = "America/Costa_Rica";
 export const EDITORIAL_PAGE_SIZE = 6;
 
+export const COAUTHORED_SAMPLE = {
+  id: "ejemplo-coautoria",
+  title: "Dos voces, un mismo sendero",
+  subtitle: "Una invitación a escribir en compañía y a escuchar otras miradas.",
+  author: "Equipo del taller y Marina del Bosque (autorías ficticias)",
+  authorUrl: "https://example.org/",
+  tags: ["Escritura compartida", "Coautoría"],
+  publishedAt: null,
+  html: `<p><em>Publicación de demostración escrita a cuatro manos. Las autorías son ficticias y no corresponden a participantes reales. El enlace a example.org es un marcador de ejemplo, no el blog de una persona real.</em></p>
+<p>Dejamos dos cuadernos abiertos sobre la mesa. En el primero había una frase: «El camino empezaba donde terminaba el ruido». En el segundo, una pregunta: «¿Y si el silencio también tuviera algo que contar?».</p>
+<p>Decidimos intercambiarlos. Quien había escrito la frase tuvo que continuar la pregunta; quien había planteado la pregunta buscó un personaje que se atreviera a caminar. Al principio intentamos explicar nuestras intenciones. Después descubrimos que escuchar el texto de la otra persona era más interesante que defender el propio.</p>
+<h2>Un ejercicio para compartir</h2>
+<p>Escribe el inicio de una escena y deja una puerta abierta: un objeto fuera de lugar, una visita inesperada o una decisión todavía pendiente. Entrega la página a otra persona para que la continúe sin corregir lo anterior. Cuando el texto regrese, léelo en voz alta antes de añadir una nueva línea.</p>
+<p>No se trata de adivinar lo que la otra persona quería decir. Se trata de reconocer una posibilidad que no habríamos encontrado a solas. A veces aparece una voz distinta; a veces, una pausa que necesitábamos.</p>
+<p>Esta muestra también permite probar un <a href="https://example.org/">enlace externo de ejemplo</a> dentro del texto. El crédito de coautoría y su enlace aparecen por separado en la ficha y en esta página de lectura.</p>
+<p>Al cerrar los cuadernos, ninguna de las dos voces había desaparecido. Habíamos encontrado una tercera: la de una conversación que seguía abierta.</p>`,
+};
+
+export function isExamplePost(id) {
+  return id === "ejemplo" || id === COAUTHORED_SAMPLE.id;
+}
+
 export function tagKey(value) {
   return value.trim().replace(/\s+/gu, " ").normalize("NFC").toLocaleLowerCase("es");
 }
