@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="600" viewBox="0 0 1200 600" role="img" aria-labelledby="title">
+  <title id="title">Ilustración provisional de un sendero entre árboles</title>
+  <rect width="1200" height="600" fill="#e8eee7"/>
+  <circle cx="850" cy="155" r="68" fill="#d2dcc5"/>
+  <path d="M0 360Q250 200 500 350T1200 300V600H0Z" fill="#b9c9b0"/>
+  <path d="M0 465Q300 310 650 430T1200 390V600H0Z" fill="#829379"/>
+  <path d="M530 600Q720 490 620 400Q560 345 665 300Q500 340 550 415Q620 490 360 600Z" fill="#f3f0e2"/>
+  <g fill="#2a4d3d">
+    <path d="m140 120-95 230h60l-80 120h230l-80-120h60zm220 75-75 180h45l-65 100h190l-65-100h45zm660-85-100 240h60l-85 130h250l-85-130h60z"/>
+  </g>
+  <g stroke="#2a4d3d" stroke-width="16" stroke-linecap="round">
+    <path d="M140 420v95m220-60v70m660-85v95"/>
+  </g>
+</svg>

@@ -1,0 +1,22 @@
+{
+  "name": "writing-workshops-preview",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@azure/storage-blob": "12.34.0",
+    "@file-viewer/doc": "3.3.3",
+    "entities": "8.1.0",
+    "google-auth-library": "11.3.4",
+    "image-size": "2.1.0",
+    "mammoth": "1.13.0",
+    "nodemailer": "10.4.0",
+    "sanitize-html": "2.18.1"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

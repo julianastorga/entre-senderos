@@ -1,0 +1,10 @@
+node_modules/
+dist/
+api/http/index.cjs
+api/http/index.cjs.LEGAL.txt
+.env
+.env.*
+!.env.example
+local.settings.json
+*.publishsettings
+infra/*.json

@@ -1,6 +1,6 @@
 # Entre Senderos
 
-Sitio de talleres de escritura en español: programas, precios de US$50, calendario en hora de Costa Rica, muestra de relatos y administración.
+Sitio de escritura en español: talleres con ediciones independientes de US$50, servicios personalizados, calendario en hora de Costa Rica, blog y administración.
 
 La implementación inicial se revisa en la rama `feat/azure-sample`. Mientras no se haya integrado el PR, usa esa rama para seguir las instrucciones de desarrollo.
 
@@ -26,21 +26,20 @@ El sitio fuente en `http://127.0.0.1:4173/` funciona como prototipo local: guard
 - API: lectura pública de talleres y relatos; solo las cuentas autorizadas pueden modificar contenido o descargar solicitudes.
 - Los cambios se protegen mediante versiones para evitar sobrescribir otras sesiones.
 - El editor admite HTML, TXT, DOC y DOCX. La conversión de Word ocurre en un worker del navegador, sin enviar los archivos originales a terceros. Se conserva el formato básico, no el diseño exacto de Word.
-- Las solicitudes del boletín quedan guardadas, pero esta muestra no envía campañas ni correos automáticos. Tampoco realiza pagos ni confirma reservas.
-- El número de WhatsApp, el correo de contacto y la identidad del equipo se incorporan cuando estén confirmados.
+- Cada taller tiene descripción, objetivos, lecturas recomendadas, modalidad editable (inicialmente «Taller corto»), detalles adicionales, portada y página propia. Los objetivos y lecturas sin completar se indican como pendientes, sin inventar contenidos. La portada aparece como fondo del título y la descripción, con una capa oscura para mantener el texto legible. La imagen subida reemplaza una ilustración provisional identificada como ejemplo. Estos campos pertenecen al taller, no a sus ediciones; las copias del catálogo los conservan. Sus ediciones tienen códigos, fechas, recurrencia y formularios independientes. La migración conserva horarios e identificadores anteriores, incluidos talleres personalizados existentes.
+- Servicios es un catálogo editable de propuestas a medida, independiente del calendario. La consulta identifica el servicio solicitado.
+- El blog destaca la publicación más reciente y muestra las anteriores en fichas con título, subtítulo e imagen, enlazadas a su lectura completa. El subtítulo es opcional, de hasta 300 caracteres; las fichas antiguas sin subtítulo usan un extracto y las que no tienen portada muestran una ilustración provisional identificada. Cada publicación admite hasta 10 etiquetas de 40 caracteres, sin duplicados por mayúsculas o composición Unicode. La nube lateral muestra sus frecuencias, permite filtrar y pasa encima del contenido en móvil. El editor permite añadir, cambiar o quitar subtítulos y etiquetas; los editores antiguos no pueden borrarlos accidentalmente en Azure.
+- La paginación conserva seis publicaciones anteriores por página, sin repetir la destacada, y URLs compartibles con `etiqueta` y `pagina`. El filtro destaca la publicación más reciente de esa etiqueta y reinicia la paginación. En Azure solo se descargan la ficha destacada, las fichas de esa página y los recuentos, no todos los artículos completos. Los antiguos campos de categoría se ignoran y se conservan las URLs `muestra.html`, `texto.html?id=…` y `admin.html#editorial`, sin perder textos, créditos ni fechas. Las fechas se muestran en `America/Costa_Rica`; las nuevas publicaciones reciben fecha del servidor y las antiguas sin fecha no reciben una fecha inventada hasta guardarlas.
+- Cada publicación admite crédito de autoría y enlace externo opcionales; el enlace requiere un nombre y aparece tanto en su ficha como en la lectura completa. El editor permite insertar, editar y quitar enlaces HTTP(S) seguros, también conservados al pegar o importar documentos. Los enlaces abren otra pestaña con `noopener noreferrer`.
+- Cada lectura permite añadir o retirar independientemente las seis reacciones de Gatugramas. Azure guarda recuentos compartidos y elecciones por navegador mediante una cookie aleatoria de primera parte, `HttpOnly`, `Secure`, `SameSite=Lax`, con duración de un año; no se usa fingerprinting. La API solo devuelve recuentos y elecciones propias, nunca identificadores de otras personas. Los cambios son idempotentes, usan versiones y tienen un límite de 60 solicitudes por minuto y dirección de origen. Esto no identifica personas únicas ni impide que alguien borre sus cookies. La vista previa local solo guarda reacciones en ese navegador.
+- Administración permite configurar WhatsApp y correo público, conectar Google Workspace mediante OAuth, administrar confirmaciones/bajas y crear campañas programadas. No se realizan pagos ni se confirman reservas.
+- El correo permanece deshabilitado hasta configurar la infraestructura privada, el dominio y el buzón. No se ha conectado una cuenta Google ni enviado correo real.
 
 ## Infraestructura independiente para demo y producción
 
 La plantilla `infra\main.bicep` crea una Static Web App Free para la demo y Standard para producción, que requiere autenticación personalizada de Microsoft Entra. Cada entorno tiene su cuenta de almacenamiento Standard LRS. Producción tiene el costo del plan Standard y el almacenamiento tiene cargos por uso; los entornos no comparten contenido ni credenciales.
 
-Ejemplo para una suscripción y un grupo de recursos nuevos:
-
-```powershell
-az login
-az account set --subscription "<subscription-id>"
-az group create --name rg-entre-senderos-demo --location eastus2
-az deployment group create --resource-group rg-entre-senderos-demo --template-file infra\main.bicep --parameters environment=demo adminGitHubLogins="<github-login>"
-```
+**Los despliegues solo se realizan mediante GitHub Actions tras commits en `main`.** Los PR ejecutan pruebas y compilación, nunca despliegan. No hay `workflow_dispatch` ni despliegue manual con la CLI. El environment `demo` solo admite la rama `main`; esta rama de PR no actualiza la muestra de Azure hasta integrarse.
 
 Para producción, selecciona su suscripción y usa otro grupo de recursos con `environment=production`. No es necesario que pertenezca a la misma infraestructura o suscripción que la demo. Los nombres de recursos y las credenciales de almacenamiento se generan para ese despliegue. La plantilla no publica las claves como salidas.
 
@@ -50,7 +49,9 @@ En GitHub, crea un environment `demo` o `production` y guarda el token de despli
 az staticwebapp secrets list --name "<site-name>" --resource-group "<resource-group>" --query properties.apiKey --output tsv | gh secret set AZURE_STATIC_WEB_APPS_API_TOKEN --env demo --repo julianastorga/entre-senderos
 ```
 
-Los cambios en `main` despliegan únicamente la demo. Producción se despliega manualmente desde GitHub Actions, seleccionando `production`; conviene exigir aprobación en ese environment. No se crea ni se modifica una infraestructura de producción automáticamente.
+Los cambios en `main` despliegan únicamente la demo. Producción no tiene un job de despliegue habilitado; requerirá una configuración revisada en main, credenciales independientes y aprobación de su environment. No se crea ni se modifica infraestructura de producción automáticamente.
+
+La provisión opcional del mismo workflow usa OIDC de Azure, restringido al environment demo y a su grupo de recursos. Configura sus variables de identidad según [la documentación del boletín](docs/newsletter.md). El script conserva las credenciales existentes y genera claves privadas de correo independientes. Habilitar el programador Logic Apps tiene cargos por uso; permanece desactivado si no se selecciona expresamente. Sin OIDC se publica sitio/API con el token SWA existente, sin modificar infraestructura.
 
 ## Administración y cuenta de demostración
 
@@ -72,4 +73,4 @@ Los archivos de Word con contraseña no se admiten. Revisa el formato y confirma
 
 ## Operación del boletín
 
-Consulta [la documentación del boletín](docs/newsletter.md) para descargar las direcciones privadas, implementar doble confirmación y bajas, administrar la lista y configurar campañas programadas. La muestra rechaza correos de ejemplo y dominios sin correo, limita una solicitud aceptada por sesión y guarda las direcciones como pendientes de confirmación. La gestión visual de listas y el envío programado se documentan como trabajo pendiente; no se envían correos actualmente.
+Consulta [la documentación del boletín](docs/newsletter.md) para conectar Google Workspace, administrar y exportar direcciones privadas, confirmar suscripciones, tramitar bajas y configurar campañas. La muestra rechaza correos de ejemplo y dominios sin correo, limita una solicitud aceptada por sesión y solo envía campañas a direcciones confirmadas. La autorización del dominio y la entrega real requieren el futuro buzón Google; no forman parte de las pruebas simuladas.
