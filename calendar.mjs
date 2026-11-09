@@ -44,7 +44,7 @@ export function createCalendar() {
     selected.forEach((event) => {
       const item = element("li");
       const link = element("a", event.label);
-      link.href = `contacto.html?curso=${encodeURIComponent(event.workshop.id)}#inscripcion`;
+      link.href = `contacto.html?edicion=${encodeURIComponent(event.workshop.id)}#inscripcion`;
       item.append(link);
       agendaList.append(item);
     });
@@ -137,8 +137,8 @@ export function createCalendar() {
         details.append(detail);
       }
       const link = element("a", "Ver formulario de inscripción", "text-link");
-      link.href = `contacto.html?curso=${encodeURIComponent(workshop.id)}#inscripcion`;
-      link.setAttribute("aria-label", `Ver formulario de inscripción: ${workshop.name}`);
+      link.href = `contacto.html?edicion=${encodeURIComponent(workshop.id)}#inscripcion`;
+      link.setAttribute("aria-label", `Ver formulario de inscripción: ${workshop.name} · ${workshop.code}`);
       card.append(details, element("p", `${formatCadence(workshop)} · ${workshop.sessions} encuentros`),
         element("p", formatSchedule(workshop)), link);
       list.append(card);

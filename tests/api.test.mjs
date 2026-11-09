@@ -1,8 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { scryptSync } from "node:crypto";
+import { scryptSync, createHash } from "node:crypto";
 import { createApi } from "../server/app.mjs";
 import { createDemoAuth } from "../server/demo-auth.mjs";
+import { migrateWorkshops } from "../catalog-model.mjs";
 import { DEFAULT_WORKSHOPS } from "../workshops.mjs";
 import { validateNewsletterEmail } from "../email-validation.mjs";
 import { verifyMailDomain } from "../server/mail-domain.mjs";
@@ -11,6 +12,12 @@ class MemoryStore {
   data = new Map();
   records = [];
   limited = false;
+  images = new Map();
+  async writeImage(bytes) {
+    const src = `/api/images/${createHash("sha256").update(bytes).digest("hex")}.png`;
+    this.images.set(src.slice("/api/images/".length), bytes); return src;
+  }
+  async readImage(name) { return this.images.get(name); }
   async read(name, initial) {
     return structuredClone(this.data.get(name) || { value: initial, version: "initial" });
   }
@@ -46,14 +53,16 @@ const create = (store = new MemoryStore(), extra = {}) => ({ store, api: createA
 
 test("shared catalog reads are public, while writes and submissions require an authorized administrator", async () => {
   const { api } = create();
-  assert.equal((await api(request("workshops"))).body.workshops.length, 3);
-  const body = { version: 1, workshops: DEFAULT_WORKSHOPS };
-  assert.equal((await api(request("workshops", "PUT", body))).status, 401);
-  assert.equal((await api(request("workshops", "PUT", body, { ...admin, "x-ms-client-principal": github("someone-else") }))).status, 403);
+  const initial = await api(request("workshops"));
+  assert.equal(initial.body.workshops.length, 3);
+  const currentAdmin = { ...admin, "if-match": initial.headers.ETag };
+  const body = migrateWorkshops(DEFAULT_WORKSHOPS);
+  assert.equal((await api(request("catalog", "PUT", body))).status, 401);
+  assert.equal((await api(request("catalog", "PUT", body, { ...admin, "x-ms-client-principal": github("someone-else") }))).status, 403);
   assert.equal((await api(request("submissions", "GET", null, {}, { kind: "enrollment" }))).status, 401);
-  assert.equal((await api(request("workshops", "PUT", body, admin))).status, 200);
-  assert.equal((await api(request("workshops", "PUT", body, admin))).status, 409);
-  assert.equal((await api(request("workshops", "PUT", body, { ...admin, "sec-fetch-site": "cross-site" }))).status, 403);
+  assert.equal((await api(request("catalog", "PUT", body, currentAdmin))).status, 200);
+  assert.equal((await api(request("catalog", "PUT", body, currentAdmin))).status, 409);
+  assert.equal((await api(request("catalog", "PUT", body, { ...admin, "sec-fetch-site": "cross-site" }))).status, 403);
 });
 
 test("the API sanitizes rich stories and validates permission and collection identity before storing", async () => {
@@ -65,6 +74,65 @@ test("the API sanitizes rich stories and validates permission and collection ide
   const saved = await api(request("showcase", "PUT", { version: 1, texts: [text] }, admin));
   assert.equal(saved.status, 200);
   assert.equal(saved.body.texts[0].html, "<p><strong>Siete gatos.</strong></p>");
+});
+
+test("edition and service inquiries retain immutable offering references after administrator deletion", async () => {
+  const { api, store } = create();
+  const initial = await api(request("catalog"));
+  const body = { email: "lectora@dominio.org", name: "Prueba", consent: true, message: "" };
+  assert.equal((await api(request("enrollment", "POST", { ...body, course: "niebla" }))).status, 202);
+  assert.equal(store.records[0].value.programId, "niebla");
+  assert.equal(store.records[0].value.editionCode, "NIE-01");
+  assert.equal((await api(request("enrollment", "POST", { ...body, course: "servicio:talleres-personalizados" }))).status, 202);
+  assert.equal(store.records[1].value.serviceName, "Talleres personalizados");
+  const updated = { ...initial.body, instances: [], services: [] };
+  assert.equal((await api(request("catalog", "PUT", updated, { ...admin, "if-match": initial.headers.ETag }))).status, 200);
+  assert.equal((await api(request("workshops"))).body.workshops.length, 0);
+  assert.equal((await api(request("enrollment", "POST", { ...body, course: "niebla" }))).status, 400);
+  assert.equal((await api(request("enrollment", "POST", { ...body, course: "servicio:talleres-personalizados" }))).status, 400);
+  assert.equal(store.records.length, 2);
+  assert.equal((await api(request("workshops", "PUT", { version: 1, workshops: DEFAULT_WORKSHOPS }, admin))).status, 409);
+});
+
+test("public Editorial pages contain only selected card metadata and publication dates are assigned by the server", async () => {
+  const { api } = create();
+  const texts = Array.from({ length: 15 }, (_, index) => ({ version: 1, id: `blog-${index}`, title: `Entrada ${index}`, author: "Autoría", permissionConfirmed: true, kind: index < 8 ? "post" : "participant", html: "<p>Una historia &amp; otra.</p><p>Final.</p>", publishedAt: "2020-01-01T00:00:00.000Z" }));
+  const saved = await api(request("showcase", "PUT", { version: 1, texts }, admin));
+  assert.equal(saved.status, 200);
+  assert.ok(saved.body.texts.every((item) => item.publishedAt !== texts[0].publishedAt));
+  const page = await api(request("editorial", "GET", null, {}, { tipo: "post", pagina: "2" }));
+  assert.equal(page.body.total, 8);
+  assert.equal(page.body.items.length, 2);
+  assert.ok(page.body.items.every((item) => item.kind === "post" && !Object.hasOwn(item, "html")));
+  assert.equal(page.body.items[0].excerpt, "Una historia & otra. Final.");
+  assert.equal((await api(request("editorial/entry", "GET", null, {}, { id: "blog-0" }))).body.text.html, texts[0].html);
+  assert.equal((await api(request("editorial/entry", "GET", null, {}, { id: "missing" }))).status, 404);
+  const originalDate = saved.body.texts[0].publishedAt;
+  const edited = await api(request("showcase", "PUT", { version: 1, texts: [{ ...saved.body.texts[0], publishedAt: texts[0].publishedAt }] }, { ...admin, "if-match": saved.headers.ETag }));
+  assert.equal(edited.body.texts[0].publishedAt, originalDate);
+});
+
+test("managed images require authenticated uploads, bounded valid bytes and accessible covers; contacts use conditional writes", async () => {
+  const { api } = create();
+  const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a0yYAAAAASUVORK5CYII=";
+  const body = { data: png, mimeType: "image/png" };
+  assert.equal((await api(request("images", "POST", body))).status, 401);
+  assert.equal((await api(request("images", "POST", { data: Buffer.from("<svg/>").toString("base64"), mimeType: "image/svg+xml" }, admin))).status, 400);
+  const image = await api(request("images", "POST", body, admin));
+  assert.equal(image.status, 201);
+  const served = await api(request(image.body.src.slice(5)));
+  assert.equal(served.headers["Content-Type"], "image/png");
+  assert.deepEqual(served.body, Buffer.from(png, "base64"));
+  const catalog = (await api(request("catalog"))).body;
+  catalog.programs[0].coverImage = { src: "https://unsafe.org/image.png", alt: "Portada" };
+  assert.equal((await api(request("catalog", "PUT", catalog, { ...admin, "if-match": '"1"' }))).status, 400);
+  catalog.programs[0].coverImage = { src: image.body.src, alt: "Portada accesible" };
+  assert.equal((await api(request("catalog", "PUT", catalog, { ...admin, "if-match": '"1"' }))).status, 200);
+  const contacts = { whatsappNumber: "+506 8888-8888", email: "hello@workshops.org" };
+  assert.equal((await api(request("settings/contacts", "PUT", contacts))).status, 401);
+  assert.equal((await api(request("settings/contacts", "PUT", contacts, admin))).body.whatsappNumber, "50688888888");
+  assert.equal((await api(request("settings/contacts", "PUT", contacts, admin))).status, 409);
+  assert.equal((await api(request("settings/contacts"))).body.email, contacts.email);
 });
 
 test("enrollment and newsletter requests require consent, valid inputs and rate limits; exported records remain private", async () => {
@@ -110,9 +178,9 @@ test("production administration requires configured Entra tenant and exact domai
     const session = await disabled(request("session", "GET", null, identity("writer@workshops.org")));
     assert.equal(session.body.admin, false);
     assert.equal(session.body.loginProvider, null);
-    assert.equal((await disabled(request("workshops", "PUT", { version: 1, workshops: DEFAULT_WORKSHOPS }, { ...identity("writer@workshops.org"), "if-match": "initial" }))).status, 403);
+    assert.equal((await disabled(request("catalog", "PUT", migrateWorkshops(DEFAULT_WORKSHOPS), { ...identity("writer@workshops.org"), "if-match": "initial" }))).status, 403);
   }
-  assert.equal((await api(request("workshops", "PUT", { version: 1, workshops: DEFAULT_WORKSHOPS }, { ...identity("writer@workshops.org"), "if-match": "initial" }))).status, 200);
+  assert.equal((await api(request("catalog", "PUT", migrateWorkshops(DEFAULT_WORKSHOPS), { ...identity("writer@workshops.org"), "if-match": "initial" }))).status, 200);
 });
 
 test("newsletter rejects placeholder addresses and domain verification failures; accepted signup is limited to one per session", async () => {
@@ -163,7 +231,7 @@ test("demo credentials produce secure, expiring sessions and are never enabled i
   assert.match(cookie, /HttpOnly; Secure; SameSite=Strict/u);
   const session = await api(request("session", "GET", null, { cookie }));
   assert.equal(session.body.admin, true);
-  const save = await api(request("workshops", "PUT", { version: 1, workshops: DEFAULT_WORKSHOPS }, { cookie, "if-match": "initial" }));
+  const save = await api(request("catalog", "PUT", migrateWorkshops(DEFAULT_WORKSHOPS), { cookie, "if-match": "initial" }));
   assert.equal(save.status, 200);
   const token = cookie.split(";")[0];
   assert.equal(demoAuth.session(token.replace("=", "=tampered")), null);

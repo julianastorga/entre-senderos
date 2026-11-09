@@ -29,6 +29,40 @@ export class BlobStore {
     return { value, version: response.etag };
   }
 
+  async writeImage(data, mimeType) {
+    const extension = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" }[mimeType];
+    const name = `${createHash("sha256").update(data).digest("hex")}.${extension}`;
+    try {
+      await this.container.getBlockBlobClient(`images/${name}`).uploadData(data, {
+        conditions: { ifNoneMatch: "*" },
+        blobHTTPHeaders: { blobContentType: mimeType, blobCacheControl: "public, max-age=86400, immutable" },
+      });
+    } catch (error) {
+      if (![409, 412].includes(error.statusCode)) throw error;
+    }
+    return `/api/images/${name}`;
+  }
+
+  async readImage(name) {
+    return this.container.getBlockBlobClient(`images/${name}`).downloadToBuffer();
+  }
+
+  async deleteJson(name, version) {
+    await this.container.getBlockBlobClient(`${name}.json`).delete({ conditions: { ifMatch: version } });
+  }
+
+  async jsonPage(prefix, continuationToken) {
+    const pages = this.container.listBlobsFlat({ prefix }).byPage({ maxPageSize: 100, continuationToken });
+    const { value } = await pages.next();
+    if (!value) return { items: [], continuationToken: null };
+    const items = await Promise.all(value.segment.blobItems.map(async (blob) => {
+      const name = blob.name.slice(0, -5);
+      const record = await this.read(name, null);
+      return { id: name.split("/").at(-1), ...record };
+    }));
+    return { items, continuationToken: value.continuationToken || null };
+  }
+
   async rateLimit(kind, address, { limit = 1, interval = 60_000 } = {}) {
     const bucket = Math.floor(Date.now() / interval);
     const key = createHash("sha256").update(`${this.salt}:${kind}:${address}:${bucket}`).digest("hex");
@@ -59,9 +93,10 @@ export class BlobStore {
         blobHTTPHeaders: { blobContentType: "application/json; charset=utf-8" },
       });
     } catch (error) {
-      if (kind === "newsletter" && [409, 412].includes(error.statusCode)) return;
+      if (kind === "newsletter" && [409, 412].includes(error.statusCode)) return { id, created: false };
       throw error;
     }
+    return { id, created: true };
   }
 
   async submissions(kind, continuationToken) {

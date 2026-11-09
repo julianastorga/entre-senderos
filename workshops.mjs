@@ -1,3 +1,6 @@
+import { CLOUD_MODE } from "./app-config.mjs";
+import { validateImage } from "./image-model.mjs";
+
 export const STORAGE_KEY = "writing-workshops:v1";
 export const WORKSHOP_PRICE = 50;
 export const WORKSHOP_TIME_ZONE = "America/Costa_Rica";
@@ -116,7 +119,7 @@ export function sessionDates(workshop) {
   });
 }
 
-export function validateWorkshop(input, existing = []) {
+export function validateWorkshop(input, existing = [], { allowDataImages = !CLOUD_MODE } = {}) {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw new WorkshopValidationError({ name: "Los datos del taller no son válidos." });
   }
@@ -138,6 +141,10 @@ export function validateWorkshop(input, existing = []) {
     accent: input.accent === undefined ? (input.id === "paramo" ? "moss" : input.id === "sotomonte" ? "fern" : "pine") : text(input.accent),
   };
   const errors = {};
+  if (input.coverImage != null) {
+    try { workshop.coverImage = validateImage(input.coverImage, { allowDataImages }); }
+    catch (error) { errors.coverImage = error.message; }
+  }
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(workshop.id) || ["all", "orientacion"].includes(workshop.id)) errors.id = "El identificador del taller no es válido o está reservado.";
   if (workshop.name.length < 3 || workshop.name.length > 100) errors.name = "Escribe un nombre de entre 3 y 100 caracteres.";
   if (!/^[A-Z0-9][A-Z0-9_-]{1,23}$/.test(workshop.code)) errors.code = "Usa de 2 a 24 letras, números, guiones o guiones bajos para el código.";
@@ -167,7 +174,7 @@ export function validateWorkshop(input, existing = []) {
   return workshop;
 }
 
-export function validateCatalog(input) {
+export function validateCatalog(input, options) {
   if (!input || input.version !== 1 || !Array.isArray(input.workshops)) {
     throw new Error("El archivo debe ser un catálogo de talleres de la versión 1.");
   }
@@ -175,7 +182,7 @@ export function validateCatalog(input) {
   for (const candidate of input.workshops) {
     // Catalogs created before time fields use the editable example hours.
     const legacy = candidate && typeof candidate === "object" && !Object.hasOwn(candidate, "startTime") && !Object.hasOwn(candidate, "endTime");
-    const workshop = validateWorkshop(legacy ? { ...candidate, ...DEFAULT_HOURS } : candidate, workshops);
+    const workshop = validateWorkshop(legacy ? { ...candidate, ...DEFAULT_HOURS } : candidate, workshops, options);
     if (workshops.some((item) => item.id === workshop.id)) throw new Error("Hay identificadores de taller repetidos.");
     workshops.push(workshop);
   }

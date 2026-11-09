@@ -1,5 +1,5 @@
 import { CLOUD_MODE } from "./app-config.mjs";
-import { STORAGE_KEY, saveWorkshops, loadWorkshops } from "./workshops.mjs";
+import { saveCatalog, loadCatalog } from "./catalog-model.mjs";
 import { SHOWCASE_KEY, saveShowcase, loadShowcase } from "./featured-text.mjs";
 
 const cache = new Map();
@@ -30,9 +30,9 @@ export async function apiRequest(path, { method = "GET", body, headers = {} } = 
 
 export async function refreshCatalog() {
   if (!CLOUD_MODE) return;
-  const { value, version } = await apiRequest("workshops");
-  saveWorkshops(memoryStorage, value.workshops);
-  versions.workshops = version;
+  const { value, version } = await apiRequest("catalog");
+  saveCatalog(memoryStorage, value);
+  versions.catalog = version;
 }
 
 export async function refreshShowcase() {
@@ -47,15 +47,15 @@ function notify() {
   window.dispatchEvent(new Event("content-changed"));
 }
 
-export async function persistCatalog(workshops) {
-  if (!CLOUD_MODE) return saveWorkshops(contentStorage, workshops);
-  const { value, version } = await apiRequest("workshops", {
-    method: "PUT", body: { version: 1, workshops }, headers: { "If-Match": versions.workshops },
+export async function persistCatalog(catalog) {
+  if (!CLOUD_MODE) return saveCatalog(contentStorage, catalog);
+  const { value, version } = await apiRequest("catalog", {
+    method: "PUT", body: catalog, headers: { "If-Match": versions.catalog },
   });
-  saveWorkshops(memoryStorage, value.workshops);
-  versions.workshops = version;
+  saveCatalog(memoryStorage, value);
+  versions.catalog = version;
   notify();
-  return loadWorkshops(memoryStorage);
+  return loadCatalog(memoryStorage);
 }
 
 export async function persistShowcase(texts) {

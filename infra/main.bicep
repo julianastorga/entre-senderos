@@ -14,6 +14,12 @@ param productionClientSecret string = ''
 param demoPasswordHash string = ''
 @secure()
 param demoSessionSecret string = ''
+@secure()
+param mailSettingsSecret string = ''
+@secure()
+param mailDispatchKey string = ''
+param enableMailScheduler bool = false
+param publicSiteOrigin string = ''
 
 var suffix = uniqueString(resourceGroup().id, environment, namePrefix)
 var storageName = 'es${environment == 'production' ? 'prod' : 'demo'}${suffix}'
@@ -82,6 +88,50 @@ resource settings 'Microsoft.Web/staticSites/config@2024-11-01' = {
     DEMO_ADMIN_USERNAME: demoAdminUsername
     DEMO_ADMIN_PASSWORD_HASH: environment == 'demo' ? demoPasswordHash : ''
     DEMO_SESSION_SECRET: environment == 'demo' ? demoSessionSecret : ''
+    MAIL_SETTINGS_SECRET: mailSettingsSecret
+    MAIL_DISPATCH_KEY: mailDispatchKey
+    MAIL_SCHEDULER_ENABLED: enableMailScheduler ? 'true' : 'false'
+    PUBLIC_SITE_ORIGIN: empty(publicSiteOrigin) ? 'https://${site.properties.defaultHostname}' : publicSiteOrigin
+  }
+}
+
+resource scheduler 'Microsoft.Logic/workflows@2019-05-01' = {
+  name: '${namePrefix}-${environment}-mail'
+  location: location
+  properties: {
+    state: enableMailScheduler ? 'Enabled' : 'Disabled'
+    definition: {
+      '$schema': 'https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#'
+      contentVersion: '1.0.0.0'
+      parameters: {
+        dispatchKey: { type: 'SecureString' }
+        dispatchOrigin: { type: 'String' }
+      }
+      triggers: {
+        every_five_minutes: {
+          type: 'Recurrence'
+          recurrence: { frequency: 'Minute', interval: 5, timeZone: 'Central America Standard Time' }
+        }
+      }
+      actions: {
+        dispatch: {
+          type: 'Http'
+          inputs: {
+            method: 'POST'
+            uri: '@{parameters(\'dispatchOrigin\')}/api/mail/dispatch'
+            headers: { 'Content-Type': 'application/json', 'x-mail-dispatch-key': '@parameters(\'dispatchKey\')' }
+            body: {}
+            retryPolicy: { type: 'none' }
+          }
+          runtimeConfiguration: { secureData: { properties: ['inputs', 'outputs'] } }
+        }
+      }
+      outputs: {}
+    }
+    parameters: {
+      dispatchKey: { value: mailDispatchKey }
+      dispatchOrigin: { value: empty(publicSiteOrigin) ? 'https://${site.properties.defaultHostname}' : publicSiteOrigin }
+    }
   }
 }
 

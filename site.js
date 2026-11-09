@@ -1,4 +1,5 @@
-import { STORAGE_KEY, WORKSHOP_ACCENTS, loadWorkshops, sessionDates, formatDate, formatPrice, formatSchedule, formatCadence } from "./workshops.mjs";
+import { STORAGE_KEY, WORKSHOP_ACCENTS, sessionDates, formatDate, formatPrice, formatSchedule, formatCadence } from "./workshops.mjs";
+import { CATALOG_KEY, loadCatalog, flattenInstances } from "./catalog-model.mjs";
 import { createCalendar } from "./calendar.mjs";
 import { createAdmin } from "./admin.mjs";
 import { initFeaturedView } from "./featured-text.mjs";
@@ -6,6 +7,9 @@ import { createFeaturedAdmin } from "./featured-admin.mjs";
 import { CLOUD_MODE } from "./app-config.mjs";
 import { contentStorage, refreshCatalog, refreshShowcase, apiRequest } from "./content-store.mjs";
 import { validateNewsletterEmail } from "./email-validation.mjs";
+import { imageElement } from "./image-model.mjs";
+import { loadContacts } from "./contact-settings.mjs";
+import { createSettingsAdmin } from "./admin-settings.mjs";
 
 document.documentElement.classList.add("js");
 
@@ -71,8 +75,6 @@ document.querySelector("#demo-login-form")?.addEventListener("submit", async (ev
   }
 });
 
-// Add verified contact details when they are provided.
-const contact = Object.freeze({ whatsappNumber: "", email: "" });
 const menuToggle = document.querySelector(".menu-toggle");
 const navigation = document.querySelector("#site-nav");
 
@@ -98,26 +100,39 @@ if (menuToggle && navigation) {
   window.matchMedia("(min-width: 801px)").addEventListener("change", closeMenu);
 }
 
-if (contact.whatsappNumber) {
-  if (!/^[1-9]\d{6,14}$/.test(contact.whatsappNumber)) throw new Error("Configura WhatsApp con el código de país y solo dígitos.");
+async function refreshContacts() {
+  if (!document.querySelector("[data-whatsapp-link], [data-contact-email]")) return;
+  let contact = { whatsappNumber: "", email: "" };
+  let failed = false;
+  try { contact = await loadContacts(); }
+  catch (error) {
+    failed = true;
+    let notice = document.querySelector("#contact-error");
+    if (!notice) { notice = element("p", undefined, "notice error-notice"); notice.id = "contact-error"; notice.setAttribute("role", "alert"); document.querySelector("main").prepend(notice); }
+    notice.hidden = false; notice.textContent = `No se pudieron cargar los contactos. ${error.message}`;
+  }
+  if (!failed && document.querySelector("#contact-error")) document.querySelector("#contact-error").hidden = true;
   document.querySelectorAll("[data-whatsapp-link]").forEach((link) => {
-    link.href = `https://wa.me/${contact.whatsappNumber}?text=${encodeURIComponent("Hola. Me gustaría saber más sobre los talleres de escritura.")}`;
+    if (!contact.whatsappNumber) link.removeAttribute("href");
+    else link.href = `https://wa.me/${contact.whatsappNumber}?text=${encodeURIComponent("Hola. Me gustaría saber más sobre los talleres de escritura.")}`;
     link.target = "_blank";
     link.rel = "noopener noreferrer";
-    link.hidden = false;
+    link.hidden = !contact.whatsappNumber;
   });
-  document.querySelectorAll("[data-whatsapp-pending]").forEach((label) => { label.hidden = true; });
+  document.querySelectorAll("[data-whatsapp-pending]").forEach((label) => { label.hidden = Boolean(contact.whatsappNumber); });
   const status = document.querySelector("#whatsapp-status");
-  if (status) status.textContent = "Escribe directamente para conversar sobre los talleres.";
-}
-if (contact.email) {
+  if (status) status.textContent = contact.whatsappNumber ? "Escribe directamente para conversar sobre los talleres." : "El número de contacto aún no está publicado.";
   document.querySelectorAll("[data-contact-email]").forEach((paragraph) => {
+    if (!contact.email) { paragraph.textContent = "La dirección de correo todavía no está publicada."; return; }
     const link = document.createElement("a");
     link.href = `mailto:${contact.email}`;
     link.textContent = contact.email;
     paragraph.replaceChildren(link);
   });
 }
+await refreshContacts();
+window.addEventListener("contacts-changed", refreshContacts);
+window.addEventListener("storage", (event) => { if (event.key === "writing-contact-settings:v1" || event.key === null) refreshContacts(); });
 
 function element(tag, text, className) {
   const node = document.createElement(tag);
@@ -126,32 +141,67 @@ function element(tag, text, className) {
   return node;
 }
 
-function renderCatalog(workshops) {
-  document.querySelectorAll("[data-workshop-cards]").forEach((container) => {
-    container.replaceChildren();
-    if (!workshops.length) container.append(element("p", "No hay talleres disponibles.", "empty-state"));
-    workshops.forEach((workshop) => {
-      const dates = sessionDates(workshop);
+function renderCatalog(catalog) {
+  const workshops = flattenInstances(catalog);
+  for (const [selector, offerings, type] of [["[data-workshop-cards]", catalog.programs, "taller"], ["[data-service-cards]", catalog.services, "servicio"]]) {
+    document.querySelectorAll(selector).forEach((container) => {
+      container.replaceChildren();
+      if (!offerings.length) container.append(element("p", "No hay propuestas disponibles.", "empty-state"));
+      offerings.forEach((offering) => {
       const card = element("article", undefined, "course-card");
-      card.style.setProperty("--workshop-accent", WORKSHOP_ACCENTS[workshop.accent].color);
-      card.append(element("p", workshop.code, "eyebrow"), element("h3", workshop.name), element("p", workshop.description));
-      const details = element("dl");
-      for (const [label, value] of [
-        ["Frecuencia", formatCadence(workshop)], ["Encuentros", String(workshop.sessions)],
-        ["Inicio", formatDate(dates[0])], ["Cierre", formatDate(dates.at(-1))],
-        ["Horario", formatSchedule(workshop)], ["Precio total", formatPrice(workshop.price)],
-      ]) {
-        const row = element("div");
-        row.append(element("dt", label), element("dd", value));
-        details.append(row);
-      }
-      const link = element("a", "Ver formulario de inscripción", "text-link");
-      link.href = `contacto.html?curso=${encodeURIComponent(workshop.id)}#inscripcion`;
-      link.setAttribute("aria-label", `Ver formulario de inscripción: ${workshop.name}`);
-      card.append(details, link);
+      card.style.setProperty("--workshop-accent", WORKSHOP_ACCENTS[offering.accent].color);
+      card.append(element("p", type === "taller" ? "Taller de escritura" : "Servicio personalizado", "eyebrow"));
+      if (offering.coverImage) card.append(imageElement(offering.coverImage, "workshop-cover"));
+      card.append(element("h3", offering.name), element("p", offering.description));
+      const count = workshops.filter((instance) => instance.programId === offering.id).length;
+      card.append(element("p", type === "servicio" ? "Consulta el formato y las condiciones." : count ? `${count} ${count === 1 ? "edición disponible" : "ediciones disponibles"} · US$50 por edición` : "Próximas fechas por anunciar.", "small-print"));
+      const link = element("a", type === "taller" ? "Conocer el taller y sus ediciones" : "Conocer el servicio", "text-link");
+      link.href = `propuesta.html?tipo=${type}&id=${encodeURIComponent(offering.id)}`;
+      link.setAttribute("aria-label", `${link.textContent}: ${offering.name}`);
+      card.append(link);
       container.append(card);
+      });
     });
-  });
+  }
+  const detail = document.querySelector("[data-offering-detail]");
+  if (detail) {
+    detail.replaceChildren();
+    const params = new URLSearchParams(location.search);
+    const isService = params.get("tipo") === "servicio";
+    const offering = (isService ? catalog.services : catalog.programs).find((item) => item.id === params.get("id"));
+    if (!offering) throw new Error("Esta propuesta ya no está disponible. Consulta Talleres o Servicios para elegir otra.");
+    document.title = offering.name;
+    const intro = element("header", undefined, "page-intro");
+    intro.append(element("p", isService ? "Servicios · Propuesta a medida" : "Talleres · Programa de escritura", "eyebrow"), element("h1", offering.name), element("p", offering.description));
+    detail.append(intro);
+    if (offering.coverImage) detail.append(imageElement(offering.coverImage, "offering-cover"));
+    const body = element("section", undefined, "offering-details section");
+    body.setAttribute("aria-label", "Detalles de la propuesta");
+    for (const paragraph of offering.details.split(/\n\s*\n/u).filter(Boolean)) body.append(element("p", paragraph));
+    detail.append(body);
+    if (isService) {
+      const inquiry = element("a", "Consultar por este servicio", "button");
+      inquiry.href = `contacto.html?servicio=${encodeURIComponent(offering.id)}#inscripcion`;
+      detail.append(inquiry);
+    } else {
+      const editions = element("section", undefined, "section");
+      editions.append(element("h2", "Ediciones y próximas fechas"));
+      const instances = workshops.filter((instance) => instance.programId === offering.id);
+      if (!instances.length) editions.append(element("p", "Todavía no hay ediciones programadas. Puedes consultar futuras fechas desde Contacto.", "empty-state"));
+      const grid = element("div", undefined, "course-grid");
+      for (const instance of instances) {
+        const dates = sessionDates(instance);
+        const card = element("article", undefined, "course-card");
+        card.style.setProperty("--workshop-accent", WORKSHOP_ACCENTS[offering.accent].color);
+        card.append(element("h3", instance.code), element("p", `${formatDate(dates[0])} – ${formatDate(dates.at(-1))}`), element("p", `${formatCadence(instance)} · ${instance.sessions} encuentros`), element("p", formatSchedule(instance)), element("p", formatPrice(instance.price)));
+        const signup = element("a", "Inscribirme en esta edición", "button");
+        signup.setAttribute("aria-label", `Inscribirme en esta edición: ${instance.code}`);
+        signup.href = `contacto.html?edicion=${encodeURIComponent(instance.id)}#inscripcion`;
+        card.append(signup); grid.append(card);
+      }
+      editions.append(grid); detail.append(editions);
+    }
+  }
   const prices = document.querySelector("[data-pricing-rows]");
   if (prices) {
     prices.replaceChildren();
@@ -171,9 +221,23 @@ function renderCatalog(workshops) {
   }
   const select = document.querySelector("#signup-course");
   if (select) {
-    const selected = select.value || new URLSearchParams(location.search).get("curso");
+    const params = new URLSearchParams(location.search);
+    const editionId = params.get("edicion");
+    const serviceId = params.get("servicio");
+    const selected = select.value || params.get("curso");
+    if (editionId && serviceId) throw new Error("El enlace de solicitud no es válido.");
     select.replaceChildren(new Option("Elige una opción", ""));
-    workshops.forEach((workshop) => select.add(new Option(`${workshop.name} (${workshop.code})`, workshop.id)));
+    if (editionId || serviceId) {
+      const instance = workshops.find((item) => item.id === editionId);
+      const service = catalog.services.find((item) => item.id === serviceId);
+      if (!instance && !service) throw new Error("La edición o el servicio de este enlace ya no está disponible.");
+      select.replaceChildren(new Option(instance ? `${instance.name} · ${instance.code} · ${formatDate(instance.startDate)}` : service.name, instance?.id || `servicio:${service.id}`, true, true));
+      document.querySelector("#inscripcion h2").textContent = instance ? `Inscripción: ${instance.name} · ${instance.code}` : `Consulta: ${service.name}`;
+      if (instance) document.querySelector(".form-intro").textContent = `${formatDate(instance.startDate)} · ${formatCadence(instance)} · ${formatSchedule(instance)} · US$50. La solicitud no confirma un lugar ni realiza un cobro.`;
+      return;
+    }
+    workshops.forEach((workshop) => select.add(new Option(`${workshop.name} · ${workshop.code} · ${formatDate(workshop.startDate)}`, workshop.id)));
+    catalog.services.forEach((service) => select.add(new Option(`Servicio: ${service.name}`, `servicio:${service.id}`)));
     select.add(new Option("Me gustaría recibir orientación", "orientacion"));
     if ([...select.options].some((option) => option.value === selected)) select.value = selected;
   }
@@ -236,10 +300,10 @@ document.querySelectorAll("[data-preview-form]").forEach((form) => {
   });
   form.querySelectorAll("[data-preview-fields]").forEach((fieldset) => { fieldset.disabled = false; });
   if (CLOUD_MODE) {
-    form.querySelector(".checkbox-label span").textContent = "Autorizo el almacenamiento privado de estos datos para gestionar mi solicitud. No se enviarán campañas desde esta muestra.";
+    form.querySelector(".checkbox-label span").textContent = form.classList.contains("newsletter-form") ? "Quiero recibir el boletín y autorizo guardar mi dirección. Solo recibiré campañas después de confirmar mi correo y podré darme de baja." : "Autorizo el almacenamiento privado de estos datos para gestionar mi solicitud.";
     form.querySelector('[type="submit"]').textContent = form.classList.contains("newsletter-form") ? "Solicitar suscripción" : "Enviar solicitud";
-    form.querySelector(".small-print").textContent = "Los datos se guardan de forma privada en Azure. Esta demostración no realiza cobros ni envía correos automáticos.";
-    if (form.classList.contains("newsletter-form")) document.querySelector("#newsletter > div > p:last-child").textContent = "Registra tu interés en recibir novedades de los talleres. El envío de campañas de correo aún no está conectado.";
+    form.querySelector(".small-print").textContent = "Los datos se guardan de forma privada en Azure. El envío requiere una cuenta de correo configurada; las campañas requieren confirmar la suscripción. No se realizan cobros.";
+    if (form.classList.contains("newsletter-form")) document.querySelector("#newsletter > div > p:last-child").textContent = "Recibe novedades de los talleres. Cuando el correo esté conectado, te enviaremos un enlace para confirmar tu dirección.";
     else {
       document.querySelector(".form-intro").textContent = "Envía tu interés en un taller. La solicitud se guarda para su revisión, pero no confirma un lugar ni realiza un cobro.";
       document.querySelector(".page-intro > p:last-child").textContent = "Consulta los talleres y envía tu solicitud de inscripción. Para probar esta demostración, utiliza datos ficticios.";
@@ -258,11 +322,16 @@ document.querySelectorAll("[data-preview-form]").forEach((form) => {
 
 const calendar = createCalendar();
 const admin = canAdminister ? createAdmin(refreshWorkshops) : null;
-await initFeaturedView(contentStorage, refreshShowcase, CLOUD_MODE);
+await initFeaturedView(contentStorage, refreshShowcase, CLOUD_MODE, async (path) => (await apiRequest(`editorial${path}`)).value);
 if (canAdminister) await createFeaturedAdmin();
+if (canAdminister) await createSettingsAdmin();
 
 const adminTabs = document.querySelector('[role="tablist"]');
 if (adminTabs && canAdminister) {
+  for (const [id, label, panel, hash] of [["settings", "Contactos", "settings-panel", "contactos"], ["mail", "Boletín", "mail-panel", "boletin"]]) {
+    const button = element("button", label); button.id = `tab-${id}`; button.type = "button";
+    button.setAttribute("role", "tab"); button.setAttribute("aria-controls", panel); button.setAttribute("aria-selected", "false"); button.tabIndex = -1; button.dataset.tabHash = hash; adminTabs.append(button);
+  }
   const tabs = [...adminTabs.querySelectorAll('[role="tab"]')];
   function selectTab(tab, focus = false) {
     tabs.forEach((item) => {
@@ -274,11 +343,12 @@ if (adminTabs && canAdminister) {
     if (focus) tab.focus();
   }
   adminTabs.hidden = false;
-  selectTab(tabs[location.hash === "#muestra" || location.hash === "#featured-text-admin" ? 1 : 0]);
+  const requestedHash = ["#muestra", "#featured-text-admin"].includes(location.hash) ? "editorial" : location.hash.slice(1);
+  selectTab(tabs.find((tab) => tab.dataset.tabHash === requestedHash) || tabs[0]);
   tabs.forEach((tab, index) => {
     tab.addEventListener("click", () => {
       selectTab(tab);
-      history.replaceState(null, "", index ? "#muestra" : "#talleres");
+      history.replaceState(null, "", `#${tab.dataset.tabHash}`);
     });
     tab.addEventListener("keydown", (event) => {
       let next;
@@ -289,7 +359,7 @@ if (adminTabs && canAdminister) {
       else return;
       event.preventDefault();
       selectTab(tabs[next], true);
-      history.replaceState(null, "", next ? "#muestra" : "#talleres");
+      history.replaceState(null, "", `#${tabs[next].dataset.tabHash}`);
     });
   });
 } else if (adminTabs) {
@@ -300,16 +370,17 @@ async function refreshWorkshops() {
   const alert = document.querySelector("#data-error");
   try {
     await refreshCatalog();
-    const workshops = loadWorkshops(contentStorage);
+    const catalog = loadCatalog(contentStorage);
+    const workshops = flattenInstances(catalog);
     alert.hidden = true;
     alert.textContent = "";
-    renderCatalog(workshops);
+    renderCatalog(catalog);
     calendar?.update(workshops);
-    admin?.update(workshops);
+    admin?.update(catalog);
   } catch (error) {
     alert.textContent = `No se pudo cargar el catálogo. ${error.message} No se han sustituido tus datos. ${CLOUD_MODE ? "Revisa la conexión y vuelve a intentarlo." : "Revisa el almacenamiento del navegador o importa una copia válida desde Administración local."}`;
     alert.hidden = false;
-    document.querySelectorAll("[data-workshop-cards], [data-pricing-rows]").forEach((container) => container.replaceChildren());
+    document.querySelectorAll("[data-workshop-cards], [data-service-cards], [data-offering-detail], [data-pricing-rows]").forEach((container) => container.replaceChildren());
     const select = document.querySelector("#signup-course");
     if (select) select.replaceChildren(new Option("Catálogo no disponible", ""));
     calendar?.update([]);
@@ -317,12 +388,12 @@ async function refreshWorkshops() {
   }
 }
 
-if (document.querySelector("[data-workshop-cards], [data-pricing-rows], #signup-course, #calendar-grid, #workshop-form")) {
+if (document.querySelector("[data-workshop-cards], [data-service-cards], [data-offering-detail], [data-pricing-rows], #signup-course, #calendar-grid, #workshop-form")) {
   await refreshWorkshops();
   window.addEventListener("content-changed", refreshWorkshops);
   if (CLOUD_MODE) window.addEventListener("focus", refreshWorkshops);
   window.addEventListener("storage", (event) => {
-    if (event.key === STORAGE_KEY || event.key === null) refreshWorkshops();
+    if ([STORAGE_KEY, CATALOG_KEY, null].includes(event.key)) refreshWorkshops();
   });
   window.addEventListener("pageshow", (event) => {
     if (event.persisted) refreshWorkshops();

@@ -4,6 +4,9 @@ import {
 } from "./featured-text.mjs";
 import { importTextFile } from "./text-import.mjs";
 import { contentStorage, refreshShowcase, persistShowcase, storageLocation } from "./content-store.mjs";
+import { createCoverUpload, uploadImage } from "./image-upload.mjs";
+import { imageElement, MAX_STORY_IMAGES } from "./image-model.mjs";
+import { ENTRY_KINDS, publicationDate } from "./editorial-model.mjs";
 
 export async function createFeaturedAdmin() {
   const form = document.querySelector("#featured-text-form");
@@ -12,6 +15,7 @@ export async function createFeaturedAdmin() {
   const editor = document.querySelector("#text-editor");
   const title = document.querySelector("#text-title");
   const author = document.querySelector("#text-author");
+  const kind = document.querySelector("#text-kind");
   const permission = document.querySelector("#text-permission");
   const counter = document.querySelector("#text-word-count");
   const status = document.querySelector("#text-admin-status");
@@ -20,12 +24,18 @@ export async function createFeaturedAdmin() {
   const formTitle = document.querySelector("#text-form-title");
   const readingLink = document.querySelector("#text-reading-link");
   const toolbar = form.querySelector(".editor-toolbar");
-  const tools = [...toolbar.querySelectorAll("[data-text-command]")];
+  const tools = [...toolbar.querySelectorAll("[data-text-command], [data-text-image]")];
+  const imageTool = toolbar.querySelector("[data-text-image]");
+  const imagePanel = document.querySelector("#inline-image-panel");
+  const imageFile = document.querySelector("#inline-image-file");
+  const imageAlt = document.querySelector("#inline-image-alt");
+  let imageRange = null;
   let editingId = null;
   let original = null;
   let dirty = false;
   let editorRevision = 0;
   const panel = form.closest('[role="tabpanel"]');
+  const cover = createCoverUpload(form, "text", status, () => { permission.checked = false; markChanged(); });
 
   function updateToolbar() {
     const selection = window.getSelection();
@@ -53,6 +63,14 @@ export async function createFeaturedAdmin() {
     original = text ? JSON.stringify(text) : null;
     title.value = text?.title || "";
     author.value = text?.author || "";
+    kind.value = text?.kind || "post";
+    document.querySelector("#text-publication-date").textContent = text ? publicationDate(text.publishedAt) : "Se publicará con la fecha y hora de Costa Rica al guardar.";
+    cover.set(text?.coverImage);
+    imagePanel.hidden = true;
+    imageTool.setAttribute("aria-expanded", "false");
+    imageFile.value = "";
+    imageAlt.value = "";
+    imageRange = null;
     permission.checked = Boolean(text?.permissionConfirmed);
     editor.replaceChildren(textFragment(text?.html || ""));
     editor.contentEditable = "true";
@@ -70,16 +88,17 @@ export async function createFeaturedAdmin() {
     if (!texts.length) {
       const empty = document.createElement("p");
       empty.className = "empty-state";
-      empty.textContent = "Todavía no hay textos guardados. La muestra enseña el relato de ejemplo.";
+      empty.textContent = "Todavía no hay textos guardados. Editorial enseña el relato de ejemplo.";
       list.append(empty);
     }
     texts.forEach((text) => {
       const card = document.createElement("article");
       card.className = "saved-text";
+      if (text.coverImage) card.append(imageElement(text.coverImage, "story-cover"));
       const heading = document.createElement("h3");
       heading.textContent = text.title;
       const credit = document.createElement("p");
-      credit.textContent = `Por ${text.author} · ${wordCount(text.html).toLocaleString("es-419")} palabras`;
+      credit.textContent = `${ENTRY_KINDS[text.kind]} · Por ${text.author} · ${publicationDate(text.publishedAt)} · ${wordCount(text.html).toLocaleString("es-419")} palabras`;
       const actions = document.createElement("div");
       actions.className = "button-row";
       const edit = document.createElement("button");
@@ -104,7 +123,7 @@ export async function createFeaturedAdmin() {
       remove.textContent = "Eliminar";
       remove.setAttribute("aria-label", `Eliminar texto: ${text.title}`);
       remove.addEventListener("click", async () => {
-        if (!window.confirm(`¿Eliminar «${text.title}» de la muestra ${storageLocation}?`)) return;
+        if (!window.confirm(`¿Eliminar «${text.title}» de Editorial ${storageLocation}?`)) return;
         panel.inert = true;
         try {
           await refreshShowcase();
@@ -113,7 +132,7 @@ export async function createFeaturedAdmin() {
           const saved = await persistShowcase(latest.filter((item) => item.id !== text.id));
           if (editingId === text.id) fillEditor();
           renderList(saved);
-          status.textContent = "Texto eliminado de la muestra. Los demás relatos no se modificaron.";
+          status.textContent = "Texto eliminado de Editorial. Los demás relatos no se modificaron.";
         } catch (error) {
           status.textContent = `No se eliminó el texto. ${error.message}`;
         } finally {
@@ -139,13 +158,13 @@ export async function createFeaturedAdmin() {
       editor.contentEditable = "false";
       fields.disabled = true;
       list.replaceChildren();
-      status.textContent = `No se pudo cargar la muestra. ${error.message} No se sobrescribió ningún dato. Puedes restablecer el ejemplo para recuperar este espacio.`;
+      status.textContent = `No se pudo cargar Editorial. ${error.message} No se sobrescribió ningún dato. Puedes restablecer el ejemplo para recuperar este espacio.`;
     }
   }
   function markChanged() {
     editorRevision += 1;
     dirty = true;
-    status.textContent = "Hay cambios sin guardar. La muestra pública todavía no se ha actualizado.";
+    status.textContent = "Hay cambios sin guardar. Editorial todavía no se ha actualizado.";
     updateCount();
   }
   window.addEventListener("beforeunload", (event) => {
@@ -177,12 +196,59 @@ export async function createFeaturedAdmin() {
     });
     button.addEventListener("mousedown", (event) => event.preventDefault());
     button.addEventListener("click", () => {
+      if (button === imageTool) {
+        const selection = window.getSelection();
+        imageRange = selection.rangeCount && editor.contains(selection.anchorNode) ? selection.getRangeAt(0).cloneRange() : null;
+        imagePanel.hidden = !imagePanel.hidden;
+        imageTool.setAttribute("aria-expanded", String(!imagePanel.hidden));
+        if (!imagePanel.hidden) imageFile.focus();
+        return;
+      }
       editor.focus();
       document.execCommand(button.dataset.textCommand, false, button.dataset.textValue || undefined);
       markChanged();
       updateToolbar();
     });
   });
+  document.querySelector("#cancel-inline-image").addEventListener("click", () => {
+      imagePanel.hidden = true;
+      imageTool.setAttribute("aria-expanded", "false");
+      imageTool.focus();
+    });
+    document.querySelector("#insert-inline-image").addEventListener("click", async () => {
+      if (!imageFile.files[0] || !imageAlt.value.trim()) {
+        status.textContent = "Elige un archivo y describe la imagen antes de insertarla.";
+        (!imageFile.files[0] ? imageFile : imageAlt).focus();
+        return;
+      }
+      panel.inert = true;
+      status.textContent = "Preparando la imagen…";
+      try {
+        if (editor.querySelectorAll("img").length >= MAX_STORY_IMAGES) throw new Error(`El relato admite hasta ${MAX_STORY_IMAGES} imágenes internas.`);
+        const src = await uploadImage(imageFile.files[0]);
+        const image = imageElement({ src, alt: imageAlt.value.trim() }, "");
+        panel.inert = false;
+        editor.focus();
+        const range = imageRange && editor.contains(imageRange.commonAncestorContainer) ? imageRange : document.createRange();
+        if (range !== imageRange) { range.selectNodeContents(editor); range.collapse(false); }
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+        if (!document.execCommand("insertHTML", false, `${image.outerHTML}<p><br></p>`)) throw new Error("No se pudo insertar la imagen en el editor.");
+        permission.checked = false;
+        imagePanel.hidden = true;
+        imageTool.setAttribute("aria-expanded", "false");
+        imageFile.value = "";
+        imageAlt.value = "";
+        imageRange = null;
+        markChanged();
+        status.textContent = "Imagen insertada. Revisa su descripción y confirma el permiso antes de guardar.";
+      } catch (error) {
+        status.textContent = `No se insertó la imagen. ${error.message}`;
+      } finally {
+        panel.inert = false;
+      }
+    });
   document.addEventListener("selectionchange", updateToolbar);
   editor.addEventListener("paste", (event) => {
     event.preventDefault();
@@ -210,7 +276,7 @@ export async function createFeaturedAdmin() {
       const { html, warnings } = await importTextFile(file);
       if (editorRevision !== revision) throw new Error("El editor cambió durante la conversión. Se conservaron tus cambios; vuelve a seleccionar el archivo para importarlo.");
       if (!wordCount(html)) throw new Error("El archivo no contiene texto legible.");
-      if (editor.textContent.trim() && !window.confirm("¿Reemplazar el contenido del editor por este archivo? Ningún texto guardado cambiará hasta guardar.")) {
+      if ((editor.textContent.trim() || editor.querySelector("img")) && !window.confirm("¿Reemplazar el contenido del editor por este archivo? Ningún texto guardado cambiará hasta guardar.")) {
         status.textContent = "Importación cancelada. El contenido del editor y los relatos guardados se conservaron.";
         return;
       }
@@ -239,6 +305,8 @@ export async function createFeaturedAdmin() {
       const text = validateFeaturedText({
         version: 1, id: editingId || crypto.randomUUID(), title: title.value,
         author: author.value, html: editor.innerHTML, permissionConfirmed: permission.checked,
+        coverImage: cover.read(),
+        kind: kind.value, publishedAt: editingId ? latest.find((item) => item.id === editingId).publishedAt || new Date().toISOString() : new Date().toISOString(),
       });
       const saved = await persistShowcase(editingId ? latest.map((item) => item.id === editingId ? text : item) : [text, ...latest]);
       fillEditor(saved.find((item) => item.id === text.id));
@@ -257,7 +325,7 @@ export async function createFeaturedAdmin() {
     }
   });
   document.querySelector("#reset-featured-text").addEventListener("click", async () => {
-    if (!window.confirm(`¿Quitar todos los textos de la muestra ${storageLocation} y volver al relato de ejemplo? También se descartarán los cambios del editor.`)) return;
+    if (!window.confirm(`¿Quitar todos los textos de Editorial ${storageLocation} y volver al relato de ejemplo? También se descartarán los cambios del editor.`)) return;
     panel.inert = true;
     try {
       await refreshShowcase();
@@ -267,19 +335,19 @@ export async function createFeaturedAdmin() {
       await loadState();
       status.textContent = "Se restableció el relato de ejemplo. No se modificó el catálogo de talleres.";
     } catch (error) {
-      status.textContent = `No se pudo restablecer la muestra. ${error.message}`;
+      status.textContent = `No se pudo restablecer Editorial. ${error.message}`;
     } finally {
       panel.inert = false;
     }
   });
   await loadState();
   window.addEventListener("content-changed", () => {
-    if (dirty) status.textContent = "La muestra cambió en otra sesión. Conservamos tus cambios; comprobaremos este relato antes de guardar.";
+    if (dirty) status.textContent = "Editorial cambió en otra sesión. Conservamos tus cambios; comprobaremos este relato antes de guardar.";
     else loadState();
   });
   window.addEventListener("storage", (event) => {
     if (![SHOWCASE_KEY, LEGACY_TEXT_KEY, null].includes(event.key)) return;
-    if (dirty) status.textContent = "La muestra cambió en otra pestaña. Conservamos tus cambios en el editor; al guardar comprobaremos que este relato no haya cambiado.";
+    if (dirty) status.textContent = "Editorial cambió en otra pestaña. Conservamos tus cambios en el editor; al guardar comprobaremos que este relato no haya cambiado.";
     else loadState();
   });
 }

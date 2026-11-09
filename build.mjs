@@ -50,7 +50,10 @@ await writeFile(target("assets", "THIRD-PARTY-NOTICES.txt"), notices.join("\n\n-
 await mkdir(target("dist"), { recursive: true });
 const frontend = [
   "styles.css", "site.js", "workshops.mjs", "calendar.mjs", "admin.mjs", "featured-text.mjs",
-  "featured-admin.mjs", "text-import.mjs", "content-store.mjs", "email-validation.mjs",
+  "featured-admin.mjs", "text-import.mjs", "content-store.mjs", "email-validation.mjs", "image-model.mjs", "image-upload.mjs",
+  "catalog-model.mjs", "offering-admin.mjs", "contact-model.mjs", "contact-settings.mjs",
+  "admin-settings.mjs", "newsletter-actions.mjs",
+  "editorial-model.mjs",
   ...(await readdir(root)).filter((name) => name.endsWith(".html")),
 ];
 for (const file of frontend) await copyFile(target(file), target("dist", file));
