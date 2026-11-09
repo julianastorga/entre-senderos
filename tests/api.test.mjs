@@ -94,6 +94,36 @@ test("edition and service inquiries retain immutable offering references after a
   assert.equal((await api(request("workshops", "PUT", { version: 1, workshops: DEFAULT_WORKSHOPS }, admin))).status, 409);
 });
 
+test("workshop sections are shared and validated, and older edition editors cannot erase them", async () => {
+  const { api } = create();
+  const initial = await api(request("catalog"));
+  const catalog = structuredClone(initial.body);
+  Object.assign(catalog.programs[0], { objectives: "Practicar escenas.\n\nRevisar un texto.", requiredReading: "Lectura de muestra.", modality: "Taller corto · En línea" });
+  const saved = await api(request("catalog", "PUT", catalog, { ...admin, "if-match": initial.headers.ETag }));
+  assert.equal(saved.status, 200);
+  const publicCatalog = await api(request("catalog"));
+  assert.equal(publicCatalog.body.programs[0].objectives, catalog.programs[0].objectives);
+  assert.equal(publicCatalog.body.programs[0].requiredReading, catalog.programs[0].requiredReading);
+  assert.equal(publicCatalog.body.programs[0].modality, catalog.programs[0].modality);
+  const oldClient = { ...catalog, programs: catalog.programs.map(({ objectives, requiredReading, modality, ...program }) => program) };
+  oldClient.instances[0].code = "NIE-UPDATED";
+  const retained = await api(request("catalog", "PUT", oldClient, { ...admin, "if-match": saved.headers.ETag }));
+  assert.equal(retained.status, 200);
+  assert.deepEqual(retained.body.programs[0], saved.body.programs[0]);
+  assert.equal(retained.body.instances[0].code, "NIE-UPDATED");
+  assert.deepEqual(retained.body.services, initial.body.services);
+  const headers = { ...admin, "if-match": retained.headers.ETag };
+  assert.equal((await api(request("catalog", "PUT", { ...catalog, programs: [{ ...catalog.programs[0], modality: "" }, ...catalog.programs.slice(1)] }, headers))).status, 400);
+  const clear = structuredClone(retained.body);
+  clear.programs[0].objectives = "";
+  clear.programs[0].requiredReading = "";
+  const cleared = await api(request("catalog", "PUT", clear, headers));
+  assert.equal(cleared.status, 200);
+  assert.equal(cleared.body.programs[0].objectives, "");
+  assert.equal(cleared.body.programs[0].requiredReading, "");
+  assert.equal(cleared.body.programs[0].modality, catalog.programs[0].modality);
+});
+
 test("public Editorial pages contain only selected card metadata and publication dates are assigned by the server", async () => {
   const { api } = create();
   const texts = Array.from({ length: 15 }, (_, index) => ({ version: 1, id: `blog-${index}`, title: `Entrada ${index}`, author: "Autoría", permissionConfirmed: true, kind: index < 8 ? "post" : "participant", html: "<p>Una historia &amp; otra.</p><p>Final.</p>", publishedAt: "2020-01-01T00:00:00.000Z" }));

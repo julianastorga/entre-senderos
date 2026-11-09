@@ -24,9 +24,24 @@ export function validateOffering(input, { allowDataImages = !CLOUD_MODE } = {}) 
   return offering;
 }
 
+export function validateProgram(input, options) {
+  const program = validateOffering(input, options);
+  for (const [field, label, maximum, initial] of [
+    ["objectives", "objetivos", 20000, ""],
+    ["requiredReading", "lecturas requeridas", 20000, ""],
+    ["modality", "modalidad", 120, "Taller corto"],
+  ]) {
+    const value = input[field] === undefined ? initial : input[field];
+    if (typeof value !== "string" || value.trim().length > maximum) throw new Error(`El campo de ${label} admite texto de hasta ${maximum.toLocaleString("es-419")} caracteres.`);
+    program[field] = value.trim();
+  }
+  if (!program.modality) throw new Error("Indica la modalidad del taller, por ejemplo: Taller corto.");
+  return program;
+}
+
 export function validateCatalogV2(input, options) {
   if (!input || input.version !== 2 || !Array.isArray(input.programs) || !Array.isArray(input.instances) || !Array.isArray(input.services)) throw new Error("El catálogo debe incluir talleres, ediciones y servicios de la versión 2.");
-  const programs = input.programs.map((program) => validateOffering(program, options));
+  const programs = input.programs.map((program) => validateProgram(program, options));
   const services = input.services.map((service) => validateOffering(service, options));
   if (new Set(programs.map((program) => program.id)).size !== programs.length || new Set(services.map((service) => service.id)).size !== services.length) throw new Error("Hay propuestas con identificadores repetidos.");
   const instances = [];

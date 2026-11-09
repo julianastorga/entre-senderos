@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { DEFAULT_WORKSHOPS, sessionDates } from "../workshops.mjs";
-import { migrateWorkshops, validateCatalogV2, flattenInstances, loadCatalog, saveCatalog, CATALOG_KEY } from "../catalog-model.mjs";
+import { migrateWorkshops, validateCatalogV2, validateProgram, flattenInstances, loadCatalog, saveCatalog, CATALOG_KEY } from "../catalog-model.mjs";
 import { readCatalog } from "../server/catalog-store.mjs";
 
 test("migration adds five reusable products, retains custom workshops, schedules and original enrollment IDs", () => {
@@ -46,6 +46,42 @@ test("services are editable offerings, do not create calendar encounters, and pe
   assert.deepEqual(loadCatalog(storage), { version: 2, programs: [], instances: [], services: [] });
   data.set(CATALOG_KEY, "{bad json");
   assert.throws(() => loadCatalog(storage));
+});
+
+test("workshop sections normalize old catalogs and survive editing and backup without changing editions or services", () => {
+  const catalog = migrateWorkshops(DEFAULT_WORKSHOPS);
+  const legacy = { ...catalog, programs: catalog.programs.map(({ objectives, requiredReading, modality, ...program }) => program) };
+  const normalized = validateCatalogV2(legacy);
+  assert.ok(normalized.programs.every((program) => program.objectives === "" && program.requiredReading === "" && program.modality === "Taller corto"));
+  const updated = {
+    ...normalized.programs[0], objectives: " Explorar la voz propia.\n\nRevisar escenas. ",
+    requiredReading: " Una lectura de muestra.\nIndicaciones para la primera sesión. ",
+    modality: " Taller corto · En línea ",
+    coverImage: { src: `/api/images/${"b".repeat(64)}.webp`, alt: "Portada del taller" },
+  };
+  normalized.programs[0] = updated;
+  const values = new Map();
+  const storage = { getItem: (key) => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) };
+  saveCatalog(storage, normalized);
+  const restored = loadCatalog(storage);
+  assert.equal(restored.programs[0].objectives, updated.objectives.trim());
+  assert.equal(restored.programs[0].requiredReading, updated.requiredReading.trim());
+  assert.equal(restored.programs[0].modality, updated.modality.trim());
+  assert.deepEqual(restored.programs[0].coverImage, updated.coverImage);
+  assert.deepEqual(restored.instances, catalog.instances);
+  assert.deepEqual(restored.services, catalog.services);
+  assert.ok(!Object.hasOwn(restored.services[0], "modality"));
+  assert.deepEqual(validateCatalogV2(JSON.parse(JSON.stringify(restored))), restored);
+});
+
+test("workshop sections reject invalid or oversized values while allowing explicitly empty objectives and readings", () => {
+  const program = migrateWorkshops(DEFAULT_WORKSHOPS).programs[0];
+  for (const invalid of [{ modality: "" }, { modality: " " }, { modality: null }, { modality: "x".repeat(121) }, { objectives: 42 }, { objectives: "x".repeat(20001) }, { requiredReading: ["Libro"] }, { requiredReading: "x".repeat(20001) }]) {
+    assert.throws(() => validateProgram({ ...program, ...invalid }));
+  }
+  const empty = validateProgram({ ...program, objectives: "", requiredReading: "" });
+  assert.equal(empty.objectives, "");
+  assert.equal(empty.requiredReading, "");
 });
 
 test("cloud migration is saved once without replacing legacy data or overwriting a concurrent migrated catalog", async () => {

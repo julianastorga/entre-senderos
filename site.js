@@ -174,11 +174,34 @@ function renderCatalog(catalog) {
     const intro = element("header", undefined, "page-intro");
     intro.append(element("p", isService ? "Servicios · Propuesta a medida" : "Talleres · Programa de escritura", "eyebrow"), element("h1", offering.name), element("p", offering.description));
     detail.append(intro);
-    if (offering.coverImage) detail.append(imageElement(offering.coverImage, "offering-cover"));
-    const body = element("section", undefined, "offering-details section");
-    body.setAttribute("aria-label", "Detalles de la propuesta");
-    for (const paragraph of offering.details.split(/\n\s*\n/u).filter(Boolean)) body.append(element("p", paragraph));
-    detail.append(body);
+    if (isService) {
+      if (offering.coverImage) detail.append(imageElement(offering.coverImage, "offering-cover"));
+    } else {
+      const cover = element("figure", undefined, "offering-cover-figure");
+      cover.append(imageElement(offering.coverImage || { src: "assets/workshop-cover.svg", alt: "Ilustración provisional de un sendero entre árboles." }, "offering-cover"));
+      if (!offering.coverImage) cover.append(element("figcaption", "Portada de ejemplo · Imagen del taller por definir.", "small-print"));
+      detail.append(cover);
+      for (const [id, label, value, pending] of [
+        ["modality", "Modalidad", offering.modality, ""],
+        ["objectives", "Objetivos", offering.objectives, "Los objetivos de este taller todavía no se han publicado."],
+        ["reading", "Lecturas requeridas", offering.requiredReading, "Las lecturas requeridas todavía no se han publicado."],
+      ]) {
+        const section = element("section", undefined, "offering-details offering-section");
+        const heading = element("h2", label);
+        heading.id = `offering-${id}`;
+        section.setAttribute("aria-labelledby", heading.id);
+        section.append(heading);
+        if (value) for (const paragraph of value.split(/\n\s*\n/u)) section.append(element("p", paragraph));
+        else section.append(element("p", pending, "empty-state"));
+        detail.append(section);
+      }
+    }
+    if (isService || offering.details) {
+      const body = element("section", undefined, "offering-details section");
+      body.setAttribute("aria-label", "Detalles de la propuesta");
+      for (const paragraph of offering.details.split(/\n\s*\n/u).filter(Boolean)) body.append(element("p", paragraph));
+      detail.append(body);
+    }
     if (isService) {
       const inquiry = element("a", "Consultar por este servicio", "button");
       inquiry.href = `contacto.html?servicio=${encodeURIComponent(offering.id)}#inscripcion`;

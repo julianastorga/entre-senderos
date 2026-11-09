@@ -1,5 +1,5 @@
 import { WORKSHOP_ACCENTS } from "./workshops.mjs";
-import { loadCatalog, validateOffering } from "./catalog-model.mjs";
+import { loadCatalog, validateOffering, validateProgram } from "./catalog-model.mjs";
 import { contentStorage, refreshCatalog, persistCatalog, storageLocation } from "./content-store.mjs";
 import { createCoverUpload } from "./image-upload.mjs";
 import { imageElement } from "./image-model.mjs";
@@ -15,11 +15,16 @@ export function createOfferingAdmin(kind, onSaved) {
     <form id="${prefix}-form"><fieldset disabled><legend class="sr-only">Definición del ${label}</legend>
     <div class="field"><label for="${prefix}-name">Nombre *</label><input id="${prefix}-name" name="name" required minlength="3" maxlength="100"></div>
     <div class="field"><label for="${prefix}-description">Descripción breve *</label><textarea id="${prefix}-description" name="description" rows="3" required maxlength="1500"></textarea></div>
-    <div class="field"><label for="${prefix}-details">Detalles de la propuesta</label><textarea id="${prefix}-details" name="details" rows="7" maxlength="20000" placeholder="Objetivos, contenidos, modalidad, destinatarios..."></textarea></div>
+    ${kind === "programs" ? `
+    <div class="field"><label for="program-modality">Modalidad *</label><input id="program-modality" name="modality" required maxlength="120" value="Taller corto" placeholder="Taller corto"></div>
+    <div class="field"><label for="program-objectives">Objetivos</label><textarea id="program-objectives" name="objectives" rows="5" maxlength="20000" placeholder="Qué aprenderán y practicarán las personas participantes."></textarea></div>
+    <div class="field"><label for="program-requiredReading">Lecturas requeridas</label><textarea id="program-requiredReading" name="requiredReading" rows="5" maxlength="20000" placeholder="Títulos, autorías e indicaciones de lectura."></textarea><p class="field-hint">Si no se requieren lecturas previas, indícalo expresamente. Los campos vacíos se mostrarán como pendientes de publicación.</p></div>` : ""}
+    <div class="field"><label for="${prefix}-details">Detalles adicionales de la propuesta</label><textarea id="${prefix}-details" name="details" rows="7" maxlength="20000" placeholder="Contenidos, destinatarios, metodología..."></textarea></div>
     <fieldset class="image-controls"><legend>Portada (opcional)</legend>
     <div class="field"><label for="${prefix}-cover-upload">Imagen JPG, PNG o WebP (hasta 8 MB)</label><input id="${prefix}-cover-upload" type="file" accept="image/jpeg,image/png,image/webp"></div>
     <div class="field"><label for="${prefix}-cover-alt">Descripción accesible de la imagen</label><input id="${prefix}-cover-alt" maxlength="250"></div>
     <p class="field-hint">Se reduce la imagen y se eliminan sus metadatos. Carga únicamente imágenes autorizadas: en Azure quedan disponibles mediante su enlace.</p>
+    ${kind === "programs" ? '<p class="field-hint">Cada página de taller muestra una portada. Mientras no cargues la suya, se utilizará una ilustración provisional identificada como ejemplo.</p>' : ""}
     <div id="${prefix}-cover-preview" class="cover-preview" hidden></div><button id="${prefix}-cover-remove" type="button" class="text-button" hidden>Quitar portada</button></fieldset>
     <div class="field"><label for="${prefix}-accent">Acento verde *</label><select id="${prefix}-accent" name="accent" required></select></div>
     <div class="button-row"><button type="submit" class="button">Guardar ${label}</button><button type="button" class="button button-outline" data-cancel hidden>Cancelar edición</button></div>
@@ -53,7 +58,8 @@ export function createOfferingAdmin(kind, onSaved) {
     event.preventDefault();
     panel.inert = true;
     try {
-      const offering = validateOffering({ id: editing?.id || crypto.randomUUID(), ...Object.fromEntries(new FormData(form)), coverImage: cover.read() });
+      const validate = kind === "programs" ? validateProgram : validateOffering;
+      const offering = validate({ id: editing?.id || crypto.randomUUID(), ...Object.fromEntries(new FormData(form)), coverImage: cover.read() });
       const catalog = await latestFor(editing);
       catalog[kind] = editing ? catalog[kind].map((item) => item.id === offering.id ? offering : item) : [...catalog[kind], offering];
       await persistCatalog(catalog);
@@ -87,7 +93,7 @@ export function createOfferingAdmin(kind, onSaved) {
         edit.addEventListener("click", () => {
           if (editing && !confirm("¿Descartar la edición actual?")) return;
           editing = structuredClone(offering);
-          for (const key of ["name", "description", "details", "accent"]) form.elements[key].value = offering[key];
+          for (const key of ["name", "description", "details", "accent", ...(kind === "programs" ? ["modality", "objectives", "requiredReading"] : [])]) form.elements[key].value = offering[key];
           cover.set(offering.coverImage);
           cancel.hidden = false; title.textContent = `Editar ${label}`; status.textContent = ""; form.elements.name.focus();
         });

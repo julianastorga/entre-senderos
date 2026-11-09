@@ -320,6 +320,18 @@ export function createApi({
         } catch (error) {
           throw new HttpError(400, error.message);
         }
+        if (path === "catalog") {
+          const current = await store.read("catalog", null);
+          const programs = current.value ? validateCatalogV2(current.value, { allowDataImages: false }).programs : [];
+          value.programs = value.programs.map((program) => {
+            const previous = programs.find((item) => item.id === program.id);
+            const input = req.body.programs.find((item) => item.id === program.id);
+            for (const field of ["objectives", "requiredReading", "modality"]) {
+              if (input[field] === undefined && previous) program[field] = previous[field];
+            }
+            return program;
+          });
+        }
         if (path === "showcase") {
           const current = await store.read("showcase", { version: 1, texts: [] });
           value.texts = value.texts.map((text) => {
