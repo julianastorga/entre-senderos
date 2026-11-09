@@ -238,6 +238,28 @@ test("anonymous reactions persist per browser, toggle independently and use idem
   assert.equal((await change("fire", true, other.headers["Set-Cookie"].split(";")[0])).body.counts.fire, 2);
 });
 
+test("the coauthored sample is readable and reactable only while no real posts are saved", async () => {
+  const { api, store } = create();
+  const query = { id: "ejemplo-coautoria" };
+  assert.deepEqual((await api(request("editorial/entry", "GET", null, {}, query))).body, { example: true });
+  const reactions = await api(request("editorial/reactions", "GET", null, {}, query));
+  assert.equal(reactions.status, 200);
+  const cookie = reactions.headers["Set-Cookie"].split(";")[0];
+  const liked = await api(request("editorial/reactions", "PUT", { reaction: "heart", active: true }, { cookie }, query));
+  assert.equal(liked.body.counts.heart, 1);
+  assert.equal((await api(request("editorial/reactions", "GET", null, {}, { id: "ejemplo" }))).body.counts.heart, 0);
+  assert.equal(store.data.has("showcase"), false, "showing or reacting to samples must not seed or overwrite the shared collection");
+  const text = { version: 1, id: "real-post", title: "Publicación propia", html: "<p>Una publicación guardada.</p>", permissionConfirmed: true };
+  for (const id of ["ejemplo", query.id]) {
+    assert.equal((await api(request("showcase", "PUT", { version: 1, texts: [{ ...text, id }] }, admin))).status, 400);
+  }
+  assert.equal((await api(request("showcase", "PUT", { version: 1, texts: [text] }, admin))).status, 200);
+  assert.equal((await api(request("editorial/entry", "GET", null, {}, query))).status, 404);
+  assert.equal((await api(request("editorial/reactions", "GET", null, {}, query))).status, 404);
+  assert.equal((await api(request("editorial/reactions", "PUT", { reaction: "heart", active: true }, { cookie }, query))).status, 404);
+  assert.equal((await api(request("editorial"))).body.featured.id, text.id);
+});
+
 test("concurrent reactions merge without lost counts or overwriting blog content", async () => {
   const { api, store } = create();
   const query = { id: "ejemplo" };

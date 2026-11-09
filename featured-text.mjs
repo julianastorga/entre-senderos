@@ -4,7 +4,7 @@ import { MAX_STORY_HTML_SIZE, MAX_STORY_IMAGES, isImageSource, validateImage } f
 export const SHOWCASE_KEY = "writing-showcase:v1";
 export const LEGACY_TEXT_KEY = "writing-featured-text:v1";
 export const MAX_TEXT_SIZE = 250_000;
-import { authorCredit, externalLink, editorialPage, postMetadata, publicationMetadata, publicationDate, tagKey } from "./editorial-model.mjs";
+import { authorCredit, COAUTHORED_SAMPLE, externalLink, editorialPage, isExamplePost, postMetadata, publicationMetadata, publicationDate, tagKey } from "./editorial-model.mjs";
 import { initReactions } from "./reactions.mjs";
 import { REACTIONS_KEY } from "./reaction-model.mjs";
 
@@ -89,7 +89,7 @@ export function readingMeta(html) {
 export function validateFeaturedText(input, { sanitize = sanitizeTextHtml, countWords = wordCount, allowDataImages = !CLOUD_MODE } = {}) {
   if (!input || input.version !== 1) throw new Error("El texto guardado no tiene un formato válido.");
   const title = typeof input.title === "string" ? input.title.trim() : "";
-  if (typeof input.id !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/u.test(input.id) || input.id === "ejemplo") throw new Error("El identificador del texto no es válido.");
+  if (typeof input.id !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/u.test(input.id) || isExamplePost(input.id)) throw new Error("El identificador del texto no es válido.");
   if (title.length < 2 || title.length > 150) throw new Error("Escribe un título de entre 2 y 150 caracteres.");
   const credit = authorCredit(input);
   const html = sanitize(input.html);
@@ -145,6 +145,9 @@ export async function initFeaturedView(storage = window.localStorage, reload = a
   }
   function exampleCard() {
     return { id: "ejemplo", publishedAt: null, title: initial.querySelector("[data-featured-title]").textContent, subtitle: initial.querySelector("[data-featured-subtitle]").textContent, tags: ["Relato breve"], author: "Texto de demostración · Autoría de muestra", excerpt: initial.querySelector("[data-featured-excerpt]").textContent, meta: initial.querySelector("[data-featured-meta]").textContent };
+  }
+  function examplePosts() {
+    return [exampleCard(), COAUTHORED_SAMPLE];
   }
   function fillTags(container, tags = []) {
     const nav = container.querySelector("[data-post-tags]");
@@ -252,8 +255,8 @@ export async function initFeaturedView(storage = window.localStorage, reload = a
     if (cloud) {
       try { data = await getEditorial(`?pagina=${encodeURIComponent(query.page)}&etiqueta=${encodeURIComponent(query.tag)}`); }
       catch (error) { if (revision !== requestRevision) return; throw error; }
-      if (data.example) data = editorialPage([exampleCard()], query);
-    } else data = editorialPage(localEntries.length ? localEntries : [exampleCard()], query);
+      if (data.example) data = editorialPage(examplePosts(), query);
+    } else data = editorialPage(localEntries.length ? localEntries : examplePosts(), query);
     if (revision !== requestRevision) return;
     const canonical = urlFor(data.page, data.tag);
     if (location.pathname + location.search !== canonical) history.replaceState(null, "", canonical + location.hash);
@@ -268,7 +271,7 @@ export async function initFeaturedView(storage = window.localStorage, reload = a
     if (!data.archiveTotal) {
       const empty = document.createElement("p"); empty.className = "empty-state"; empty.textContent = "Todavía no hay publicaciones anteriores."; archive.append(empty);
     }
-    document.querySelectorAll("[data-featured-sample]").forEach((node) => { node.hidden = data.featured?.id !== "ejemplo"; });
+    document.querySelectorAll("[data-featured-sample]").forEach((node) => { node.hidden = !isExamplePost(data.featured?.id); });
     const start = data.archiveTotal ? (data.page - 1) * data.pageSize + 1 : 0;
     results.textContent = data.archiveTotal ? `${start}–${Math.min(data.page * data.pageSize, data.archiveTotal)} de ${data.archiveTotal} publicaciones anteriores · Página ${data.page} de ${data.pages}` : "No hay publicaciones anteriores.";
     const tagLabel = data.tags.find((item) => item.key === data.tag)?.name || data.tag;
@@ -336,11 +339,16 @@ export async function initFeaturedView(storage = window.localStorage, reload = a
       errorNotice.hidden = true;
       document.title = originalTitle;
       document.querySelector('meta[name="description"]').content = originalDescription;
-      if (!texts.length && (!isReader || !requested || requested === "ejemplo")) {
+      if (!texts.length && (!requested || isExamplePost(requested))) {
+        const sample = requested === COAUTHORED_SAMPLE.id ? COAUTHORED_SAMPLE : null;
+        if (sample) {
+          const summary = fill(content, sample);
+          document.title = `${sample.title} · Blog`;
+          document.querySelector('meta[name="description"]').content = summary;
+        } else fillTags(content, ["Relato breve"]);
         content.querySelector(".eyebrow").textContent = "Blog · Ejemplo ficticio";
         document.querySelectorAll("[data-featured-sample]").forEach((node) => { node.hidden = false; });
-        fillTags(content, ["Relato breve"]);
-        await initReactions(content, "ejemplo", storage, cloud, getEditorial);
+        await initReactions(content, sample?.id || "ejemplo", storage, cloud, getEditorial);
         return;
       }
       document.querySelectorAll("[data-featured-sample]").forEach((node) => { node.hidden = true; });

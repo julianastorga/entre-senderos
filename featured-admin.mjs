@@ -102,7 +102,7 @@ export async function createFeaturedAdmin() {
     if (!texts.length) {
       const empty = document.createElement("p");
       empty.className = "empty-state";
-      empty.textContent = "Todavía no hay textos guardados. El blog enseña el relato de ejemplo.";
+      empty.textContent = "Todavía no hay textos guardados. El blog muestra las publicaciones de ejemplo.";
       list.append(empty);
     }
     texts.forEach((text) => {
@@ -410,7 +410,7 @@ export async function createFeaturedAdmin() {
     }
   });
   document.querySelector("#reset-featured-text").addEventListener("click", async () => {
-    if (!window.confirm(`¿Quitar todos los textos del blog ${storageLocation} y volver al relato de ejemplo? También se descartarán los cambios del editor.`)) return;
+    if (!window.confirm(`¿Quitar todos los textos del blog ${storageLocation} y volver a las publicaciones de ejemplo? También se descartarán los cambios del editor.`)) return;
     panel.inert = true;
     try {
       await refreshShowcase();
@@ -418,7 +418,7 @@ export async function createFeaturedAdmin() {
       editingId = null;
       dirty = false;
       await loadState();
-      status.textContent = "Se restableció el relato de ejemplo. No se modificó el catálogo de talleres.";
+      status.textContent = "Se restablecieron las publicaciones de ejemplo. No se modificó el catálogo de talleres.";
     } catch (error) {
       status.textContent = `No se pudo restablecer el blog. ${error.message}`;
     } finally {
