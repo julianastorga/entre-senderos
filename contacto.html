@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Opciones de contacto e inscripción a los talleres de escritura.">
+  <title>Contacto e inscripción</title>
+  <link rel="icon" href="data:,"><link rel="stylesheet" href="styles.css"><script src="site.js" type="module"></script>
+</head>
+<body>
+  <a class="skip-link" href="#contenido">Saltar al contenido</a>
+  <div class="preview-bar">Prototipo sin identidad visual · Programas y precios de muestra · Formularios sin envío</div>
+  <header class="site-header container">
+    <a class="site-label" href="index.html">Talleres de escritura</a>
+    <button class="menu-toggle" type="button" aria-controls="site-nav" aria-expanded="false">Menú</button>
+    <nav id="site-nav" class="site-nav" aria-label="Navegación principal"><a href="index.html">Inicio</a><a href="cursos.html">Talleres</a><a href="calendario.html">Calendario</a><a href="muestra.html">Muestra</a><a href="acerca-de.html">Acerca de nuestro equipo</a><a href="contacto.html" aria-current="page">Contacto</a></nav>
+  </header>
+  <main id="contenido" class="container">
+    <div id="data-error" class="notice error-notice" role="alert" hidden></div>
+    <section class="page-intro"><p class="eyebrow">Consultas y solicitudes</p><h1>Contacto e inscripción</h1><p>Este será el punto de encuentro para resolver dudas y solicitar tu inscripción. Por ahora puedes explorar cómo funcionará.</p></section>
+    <section class="contact-layout section-bottom">
+      <div id="inscripcion" class="form-panel"><h2>Solicitud de inscripción</h2><p class="form-intro">Vista previa: usa datos ficticios. El formulario no envía ni guarda información y no reserva un lugar.</p>
+        <form data-preview-form novalidate>
+          <fieldset disabled data-preview-fields><legend class="sr-only">Datos de la solicitud de muestra</legend>
+            <div class="sr-only" aria-hidden="true"><label for="signup-website">Deja este campo vacío</label><input id="signup-website" name="website" tabindex="-1" autocomplete="off"></div>
+            <div class="form-row"><div class="field"><label for="signup-name">Tu nombre <span aria-hidden="true">*</span></label><input id="signup-name" name="name" autocomplete="name" maxlength="100" required aria-describedby="signup-name-error"><span class="field-error" id="signup-name-error"></span></div><div class="field"><label for="signup-email">Correo electrónico <span aria-hidden="true">*</span></label><input id="signup-email" name="email" type="email" autocomplete="email" required aria-describedby="signup-email-error"><span class="field-error" id="signup-email-error"></span></div></div>
+            <div class="field"><label for="signup-course">¿Qué taller te interesa? <span aria-hidden="true">*</span></label><select id="signup-course" name="course" required aria-describedby="signup-course-error"><option value="">Elige una opción</option><option value="orientacion">Me gustaría recibir orientación</option></select><span class="field-error" id="signup-course-error"></span></div>
+            <div class="field"><label for="signup-message">Un poco de tu historia <span class="optional">(opcional)</span></label><textarea id="signup-message" name="message" rows="4" maxlength="2000" placeholder="¿Qué te mueve a escribir? ¿Hay algo que quieras preguntar?"></textarea></div>
+            <label class="checkbox-label"><input id="signup-consent" type="checkbox" name="consent" required aria-describedby="signup-consent-error"><span>Entiendo que este formulario es una demostración y que no se enviarán mis datos. <span aria-hidden="true">*</span></span></label><span id="signup-consent-error" class="field-error"></span>
+            <button type="submit" class="button">Probar solicitud <span aria-hidden="true">↗</span></button>
+          </fieldset>
+          <p class="small-print">Los campos con * son obligatorios. No hay pagos ni inscripciones activas.</p><p class="form-status" role="status" aria-live="polite"></p>
+        </form>
+        <noscript><p class="notice">La vista previa del formulario necesita JavaScript. No se realizará ningún envío.</p></noscript>
+      </div>
+      <aside class="contact-aside">
+        <section id="whatsapp" class="contact-card"><h3>WhatsApp</h3><p id="whatsapp-status">El número de contacto aún no está publicado. Se incorporará cuando la persona responsable lo proporcione.</p><a class="button button-outline" data-whatsapp-link href="#whatsapp-status" hidden>Escribir por WhatsApp</a><span class="availability-label" data-whatsapp-pending>Número por confirmar</span></section>
+        <section class="contact-card email-card"><h3>Correo electrónico</h3><p data-contact-email>La dirección de correo se publicará aquí antes de abrir las inscripciones.</p></section>
+        <section class="newsletter-mini"><h3>Boletín de novedades</h3><p>Consulta la vista previa de la suscripción para recibir futuras convocatorias.</p><a class="text-link" href="index.html#newsletter">Ver el boletín</a></section>
+      </aside>
+    </section>
+  </main>
+  <footer class="site-footer"><div class="container footer-main"><span>Prototipo · Identidad por definir</span><div class="footer-links"><a href="index.html#newsletter">Boletín</a><a href="contacto.html">Contacto</a><a href="admin.html">Administración local</a></div></div></footer>
+</body>
+</html>

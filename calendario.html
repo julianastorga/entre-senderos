@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="description" content="Calendario de encuentros, inicios y cierres de los talleres de escritura.">
+  <title>Calendario de talleres</title><link rel="icon" href="data:,"><link rel="stylesheet" href="styles.css"><script src="site.js" type="module"></script>
+</head>
+<body>
+  <a class="skip-link" href="#contenido">Saltar al contenido</a><div class="preview-bar">Prototipo sin identidad visual · Programas y precios de muestra · Formularios sin envío</div>
+  <header class="site-header container"><a class="site-label" href="index.html">Talleres de escritura</a><button class="menu-toggle" type="button" aria-controls="site-nav" aria-expanded="false">Menú</button><nav id="site-nav" class="site-nav" aria-label="Navegación principal"><a href="index.html">Inicio</a><a href="cursos.html">Talleres</a><a href="calendario.html" aria-current="page">Calendario</a><a href="muestra.html">Muestra</a><a href="acerca-de.html">Acerca de nuestro equipo</a><a href="contacto.html">Contacto</a></nav></header>
+  <main id="contenido" class="container">
+    <div id="data-error" class="notice error-notice" role="alert" hidden></div>
+    <section class="page-intro"><p class="eyebrow">Fechas y frecuencia</p><h1>Calendario de talleres</h1><p>Cada encuentro se calcula a partir de la fecha de inicio, la frecuencia y el número de sesiones. Selecciona un día marcado para consultar sus actividades. El número pequeño indica cuántos talleres hay ese día.</p></section>
+    <section class="calendar-layout section-bottom" aria-label="Calendario y fechas de los talleres">
+      <div class="calendar-panel"><div class="calendar-toolbar"><h2 id="calendar-month">Calendario mensual</h2><div class="calendar-controls"><button type="button" data-calendar-prev aria-label="Mes anterior">←</button><button type="button" data-calendar-next aria-label="Mes siguiente">→</button></div></div><label class="calendar-filter" for="course-filter">Taller <select id="course-filter"><option value="all">Todos los talleres</option></select></label><div id="calendar-grid"></div><p id="calendar-announcement" class="sr-only" role="status" aria-live="polite"></p><p id="calendar-month-summary" class="small-print"></p><div class="day-agenda" id="day-agenda" hidden><h3 id="day-agenda-title" tabindex="-1"></h3><ul id="day-agenda-list"></ul></div><p class="small-print">Se señalan todos los encuentros, incluidos el inicio y el cierre. Todos los horarios corresponden a Costa Rica (America/Costa_Rica, UTC−6), sin convertirlos a la zona horaria del dispositivo.</p><noscript><p>Activa JavaScript para consultar el calendario actualizado.</p></noscript></div>
+      <aside><h2 class="aside-heading">Los recorridos</h2><div class="schedule-list" data-schedule-list></div></aside>
+    </section>
+  </main>
+  <footer class="site-footer"><div class="container footer-main"><span>Prototipo · Identidad por definir</span><div class="footer-links"><a href="index.html#newsletter">Boletín</a><a href="contacto.html">Contacto</a><a href="admin.html">Administración local</a></div></div></footer>
+</body>
+</html>

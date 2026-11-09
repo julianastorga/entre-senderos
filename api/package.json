@@ -1,0 +1,5 @@
+{
+  "name": "entre-senderos-api",
+  "private": true,
+  "engines": { "node": "22.x" }
+}
