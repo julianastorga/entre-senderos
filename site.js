@@ -172,19 +172,24 @@ function renderCatalog(catalog) {
     if (!offering) throw new Error("Esta propuesta ya no está disponible. Consulta Talleres o Servicios para elegir otra.");
     document.title = offering.name;
     const intro = element("header", undefined, "page-intro");
-    intro.append(element("p", isService ? "Servicios · Propuesta a medida" : "Talleres · Programa de escritura", "eyebrow"), element("h1", offering.name), element("p", offering.description));
+    const introContent = isService ? intro : element("div", undefined, "offering-hero-content");
+    introContent.append(element("p", isService ? "Servicios · Propuesta a medida" : "Talleres · Programa de escritura", "eyebrow"), element("h1", offering.name), element("p", offering.description));
+    if (!isService) {
+      intro.classList.add("offering-hero");
+      const image = imageElement(offering.coverImage || { src: "assets/workshop-cover.svg", alt: "Ilustración provisional de un sendero entre árboles." }, "offering-hero-image");
+      image.loading = "eager";
+      image.fetchPriority = "high";
+      intro.append(image, introContent);
+    }
     detail.append(intro);
     if (isService) {
       if (offering.coverImage) detail.append(imageElement(offering.coverImage, "offering-cover"));
     } else {
-      const cover = element("figure", undefined, "offering-cover-figure");
-      cover.append(imageElement(offering.coverImage || { src: "assets/workshop-cover.svg", alt: "Ilustración provisional de un sendero entre árboles." }, "offering-cover"));
-      if (!offering.coverImage) cover.append(element("figcaption", "Portada de ejemplo · Imagen del taller por definir.", "small-print"));
-      detail.append(cover);
+      if (!offering.coverImage) detail.append(element("p", "Portada de ejemplo · Imagen del taller por definir.", "small-print offering-cover-caption"));
       for (const [id, label, value, pending] of [
         ["modality", "Modalidad", offering.modality, ""],
         ["objectives", "Objetivos", offering.objectives, "Los objetivos de este taller todavía no se han publicado."],
-        ["reading", "Lecturas requeridas", offering.requiredReading, "Las lecturas requeridas todavía no se han publicado."],
+        ["reading", "Lecturas recomendadas", offering.requiredReading, "Las lecturas recomendadas todavía no se han publicado."],
       ]) {
         const section = element("section", undefined, "offering-details offering-section");
         const heading = element("h2", label);

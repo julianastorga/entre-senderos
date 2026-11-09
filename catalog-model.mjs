@@ -28,7 +28,8 @@ export function validateProgram(input, options) {
   const program = validateOffering(input, options);
   for (const [field, label, maximum, initial] of [
     ["objectives", "objetivos", 20000, ""],
-    ["requiredReading", "lecturas requeridas", 20000, ""],
+    // Keep the stored key so existing catalogs retain their reading lists.
+    ["requiredReading", "lecturas recomendadas", 20000, ""],
     ["modality", "modalidad", 120, "Taller corto"],
   ]) {
     const value = input[field] === undefined ? initial : input[field];
