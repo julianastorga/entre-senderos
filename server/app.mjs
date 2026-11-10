@@ -14,7 +14,7 @@ import { decodeHTML } from "entities";
 import { editorialPage, externalLink, postMetadata } from "../editorial-model.mjs";
 import { REACTIONS, emptyReactions, reactionSummary, setReaction } from "../reaction-model.mjs";
 import { validatePhone } from "../phone-model.mjs";
-import { enrollmentStatus, validEnrollmentId, validateEnrollmentStatus } from "../enrollment-model.mjs";
+import { enrollmentStatus, validEnrollmentId, validateEnrollmentStatus, validateEnrollmentContact, validatePaymentMethod, editionAssignment } from "../enrollment-model.mjs";
 
 const newsletterCookie = "__Secure-entre_senderos_newsletter";
 const reactionsCookie = "__Host-entre_senderos_reactions";
@@ -329,11 +329,12 @@ export function createApi({
           value.programs = value.programs.map((program) => {
             const previous = programs.find((item) => item.id === program.id);
             const input = req.body.programs.find((item) => item.id === program.id);
-            for (const field of ["overview", "audience", "objectives", "requiredReading", "modality"]) {
+            for (const field of ["overview", "audience", "objectives", "requiredReading", "modality", "priceCRC", "priceUSD"]) {
               if (input[field] === undefined && previous) program[field] = previous[field];
             }
             return program;
           });
+          value = validateCatalogV2(value, { allowDataImages: false });
         }
         if (path === "showcase") {
           const current = await store.read("showcase", { version: 1, texts: [] });
@@ -358,16 +359,47 @@ export function createApi({
           const page = await store.jsonPage("submissions/enrollment/", req.query?.continuationToken);
           return response(200, { ...page, items: page.items.filter((item) => item.value).map((item) => ({ ...item, value: { ...item.value, status: enrollmentStatus(item.value) } })) });
         }
-        if (method !== "PUT") throw new HttpError(405, "Método no admitido.");
+        if (!["POST", "PUT"].includes(method)) throw new HttpError(405, "Método no admitido.");
         requireJson();
+        if (!req.body || typeof req.body !== "object" || Array.isArray(req.body) || JSON.stringify(req.body).length > 10_000) throw new HttpError(400, "La inscripción no tiene un formato válido.");
+        if (method === "POST") {
+          if (!validEnrollmentId(req.body.id)) throw new HttpError(400, "El identificador de la nueva inscripción no es válido. Actualiza la página.");
+          if (req.body.consent !== true) throw new HttpError(400, "Confirma que tienes autorización para registrar estos datos.");
+          const { value: catalog } = await readCatalog(store);
+          const instance = flattenInstances(catalog).find((item) => item.id === req.body.course);
+          if (!instance) throw new HttpError(400, "Elige una edición existente para añadir a la persona.");
+          let value;
+          try {
+            const status = validateEnrollmentStatus(req.body.status ?? "interested");
+            value = { ...validateEnrollmentContact(req.body), ...validatePhone(req.body), ...editionAssignment(instance),
+              status, paymentMethod: validatePaymentMethod(req.body.paymentMethod, status), consent: true, source: "admin", createdAt: new Date().toISOString() };
+          } catch (error) { throw new HttpError(400, error.message); }
+          const saved = await store.write(`submissions/enrollment/${req.body.id}`, value, "initial");
+          return response(201, { id: req.body.id, value: saved.value }, saved.version);
+        }
         if (!headers["if-match"]) throw new HttpError(428, "Actualiza las inscripciones antes de guardar.");
-        if (!validEnrollmentId(req.query?.id) || !req.body || JSON.stringify(req.body).length > 500) throw new HttpError(400, "Elige una inscripción y un estado válidos.");
+        if (!validEnrollmentId(req.query?.id)) throw new HttpError(400, "Elige una inscripción y un estado válidos.");
         let status;
         try { status = validateEnrollmentStatus(req.body.status); } catch (error) { throw new HttpError(400, error.message); }
         const name = `submissions/enrollment/${req.query.id}`;
         const current = await store.read(name, null);
         if (!current.value) throw new HttpError(404, "Esta inscripción ya no está disponible.");
-        const saved = await store.write(name, { ...current.value, status, updatedAt: new Date().toISOString() }, headers["if-match"]);
+        let paymentMethod;
+        try { paymentMethod = validatePaymentMethod(req.body.paymentMethod === undefined ? current.value.paymentMethod : req.body.paymentMethod, status); }
+        catch (error) { throw new HttpError(400, error.message); }
+        const next = { ...current.value, status, updatedAt: new Date().toISOString() };
+        if (paymentMethod || req.body.paymentMethod !== undefined || current.value.paymentMethod !== undefined) next.paymentMethod = paymentMethod;
+        if (req.body.course !== undefined && req.body.course !== current.value.course) {
+          const { value: catalog } = await readCatalog(store);
+          const instance = flattenInstances(catalog).find((item) => item.id === req.body.course);
+          if (!instance) throw new HttpError(400, "La edición de destino ya no está disponible. Actualiza el catálogo.");
+          const original = Object.fromEntries(["course", "programId", "workshopName", "editionCode", "startDate", "serviceId", "serviceName"]
+            .filter((key) => current.value[key] !== undefined).map((key) => [key, current.value[key]]));
+          Object.assign(next, editionAssignment(instance), { originalAssignment: current.value.originalAssignment || original });
+          delete next.serviceId;
+          delete next.serviceName;
+        }
+        const saved = await store.write(name, next, headers["if-match"]);
         return response(200, saved.value, saved.version);
       }
       if (path === "submissions" && method === "GET") {
@@ -399,18 +431,15 @@ export function createApi({
           Object.assign(value, { email, status: "pending_confirmation" });
         }
         if (path === "enrollment") {
-          const name = typeof body.name === "string" ? body.name.trim() : "";
-          const message = typeof body.message === "string" ? body.message.trim() : "";
-          if (!name || name.length > 100 || message.length > 2000) throw new HttpError(400, "Revisa el nombre y el mensaje de la solicitud.");
-          let phone;
-          try { phone = validatePhone(body); } catch (error) { throw new HttpError(400, error.message); }
+          let contact;
+          try { contact = { ...validateEnrollmentContact(body), ...validatePhone(body) }; } catch (error) { throw new HttpError(400, error.message); }
           const { value: catalog } = await readCatalog(store);
           const instance = flattenInstances(catalog).find((workshop) => workshop.id === body.course);
           const service = typeof body.course === "string" && body.course.startsWith("servicio:") ? catalog.services.find((item) => item.id === body.course.slice(9)) : null;
           if (body.course !== "orientacion" && !instance && !service) throw new HttpError(400, "La edición o el servicio seleccionado ya no está disponible.");
-          if (instance) Object.assign(value, { programId: instance.programId, workshopName: instance.name, editionCode: instance.code, startDate: instance.startDate });
+          if (instance) Object.assign(value, editionAssignment(instance));
           if (service) Object.assign(value, { serviceId: service.id, serviceName: service.name });
-          Object.assign(value, { name, course: body.course, message, ...phone, status: "interested" });
+          Object.assign(value, { ...contact, course: body.course, status: "interested" });
         }
         try {
           await store.rateLimit(path, headers["x-forwarded-for"] || email);

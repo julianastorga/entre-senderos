@@ -276,6 +276,12 @@ fieldset { margin: 0; padding: 0; border: 0; min-width: 0; }
 .saved-text .button-row { margin-top: 14px; gap: 15px; }
 .saved-text h4 { margin: 0; font-size: 25px; line-height: 1.35; font-weight: 400; }
 .enrollment-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; margin-block: 25px; }
+.enrollment-groups { display: grid; gap: 30px; margin-block: 25px; }
+.enrollment-group { min-width: 0; border-top: 1px solid var(--line); padding-top: 24px; }
+.enrollment-card h4 { font-size: 23px; font-weight: 400; margin: 0; overflow-wrap: anywhere; }
+.manual-enrollment { margin-block: 24px; }
+.manual-enrollment summary { min-height: 44px; }
+.manual-enrollment form { margin-top: 20px; }
 .enrollment-card { margin-bottom: 0; min-width: 0; }
 .enrollment-contact { display: flex; flex-direction: column; align-items: flex-start; margin-block: 15px; }
 .enrollment-contact a { display: inline-flex; align-items: center; min-height: 44px; max-width: 100%; }

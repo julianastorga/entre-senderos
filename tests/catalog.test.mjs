@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { DEFAULT_WORKSHOPS, sessionDates } from "../workshops.mjs";
+import { DEFAULT_WORKSHOPS, sessionDates, formatWorkshopPrices } from "../workshops.mjs";
 import { migrateWorkshops, validateCatalogV2, validateProgram, flattenInstances, loadCatalog, saveCatalog, CATALOG_KEY } from "../catalog-model.mjs";
 import { readCatalog } from "../server/catalog-store.mjs";
 
@@ -46,6 +46,55 @@ test("services are editable offerings, do not create calendar encounters, and pe
   assert.deepEqual(loadCatalog(storage), { version: 2, programs: [], instances: [], services: [] });
   data.set(CATALOG_KEY, "{bad json");
   assert.throws(() => loadCatalog(storage));
+});
+
+test("legacy catalogs keep their USD prices and leave CRC pending without inventing a conversion", () => {
+  const catalog = migrateWorkshops(DEFAULT_WORKSHOPS);
+  const legacy = { ...catalog, programs: catalog.programs.map(({ priceCRC, priceUSD, ...program }) => program) };
+  const normalized = validateCatalogV2(legacy);
+  assert.ok(normalized.programs.every((program) => program.priceCRC === null && program.priceUSD === 50));
+  assert.ok(flattenInstances(normalized).every((instance) => instance.priceCRC === null && instance.priceUSD === 50));
+  assert.match(formatWorkshopPrices(normalized.programs[0]), /CRC: por confirmar.*50.*USD/u);
+  assert.deepEqual(normalized.instances.map(sessionDates), catalog.instances.map(sessionDates));
+});
+
+test("independent workshop prices propagate to every edition and survive save/import without changing schedules", () => {
+  const catalog = migrateWorkshops(DEFAULT_WORKSHOPS);
+  catalog.instances.push({ ...catalog.instances[0], id: "another-edition", code: "NIE-02", startDate: "2027-02-02", price: 999 });
+  catalog.programs[0].priceCRC = 27500.5;
+  catalog.programs[0].priceUSD = 65.75;
+  catalog.programs[1].priceCRC = 0;
+  catalog.programs[1].priceUSD = null;
+  const dates = catalog.instances.map(sessionDates);
+  const data = new Map();
+  const storage = { getItem: (key) => data.get(key) ?? null, setItem: (key, value) => data.set(key, value) };
+  saveCatalog(storage, catalog);
+  const restored = validateCatalogV2(JSON.parse(JSON.stringify(loadCatalog(storage))));
+  const instances = flattenInstances(restored);
+  assert.deepEqual(instances.filter(({ programId }) => programId === "niebla").map(({ priceCRC, priceUSD, price }) => [priceCRC, priceUSD, price]), [[27500.5, 65.75, 65.75], [27500.5, 65.75, 65.75]]);
+  assert.equal(instances[1].priceCRC, 0);
+  assert.equal(instances[1].priceUSD, null);
+  assert.equal(instances[1].price, null);
+  assert.match(formatWorkshopPrices(instances[1]), /0.*CRC.*USD: por confirmar/u);
+  assert.deepEqual(restored.instances.map(sessionDates), dates);
+  assert.deepEqual(restored.services, catalog.services);
+  assert.equal(Object.hasOwn(restored.services[0], "priceCRC"), false);
+  const free = validateProgram({ ...restored.programs[0], priceCRC: 0, priceUSD: 0 });
+  assert.doesNotMatch(formatWorkshopPrices(free), /confirmar|NaN/u);
+  const pending = validateProgram({ ...free, priceCRC: null, priceUSD: null });
+  assert.equal(formatWorkshopPrices(pending), "CRC: por confirmar · USD: por confirmar");
+});
+
+test("workshop prices reject negative, nonnumeric, unsafe and overprecise amounts in either currency", () => {
+  const program = migrateWorkshops(DEFAULT_WORKSHOPS).programs[0];
+  for (const field of ["priceCRC", "priceUSD"]) {
+    for (const invalid of [-1, NaN, Infinity, -Infinity, "50", "", true, {}, [], 1.005, 0.001, Number.MAX_SAFE_INTEGER]) {
+      assert.throws(() => validateProgram({ ...program, [field]: invalid }), /precio/u, `${field}: ${String(invalid)}`);
+    }
+    for (const valid of [0, 0.01, 0.29, 19.99, 1234567.89, null]) {
+      assert.equal(validateProgram({ ...program, [field]: valid })[field], valid);
+    }
+  }
 });
 
 test("workshop sections normalize old catalogs and survive editing and backup without changing editions or services", () => {

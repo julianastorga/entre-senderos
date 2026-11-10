@@ -1,4 +1,4 @@
-import { STORAGE_KEY, WORKSHOP_ACCENTS, WORKSHOP_PRICE, sessionDates, upcomingEditions, formatDate, formatPrice, formatSchedule, formatCadence } from "./workshops.mjs";
+import { STORAGE_KEY, WORKSHOP_ACCENTS, sessionDates, upcomingEditions, formatDate, formatWorkshopPrices, formatSchedule, formatCadence } from "./workshops.mjs";
 import { CATALOG_KEY, loadCatalog, flattenInstances } from "./catalog-model.mjs";
 import { createCalendar } from "./calendar.mjs";
 import { createAdmin } from "./admin.mjs";
@@ -210,7 +210,7 @@ function renderCatalog(catalog) {
       if (!offering.coverImage) detail.append(element("p", "Portada de ejemplo · Imagen del taller por definir.", "small-print offering-cover-caption"));
       for (const [id, label, value, pending] of [
         ["modality", "Modalidad", offering.modality, ""],
-        ["price", "Precio por edición", formatPrice(WORKSHOP_PRICE), ""],
+        ["price", "Precios por edición", formatWorkshopPrices(offering), ""],
         ["overview", "En qué consiste", offering.overview, "La descripción de la dinámica de este taller todavía no se ha publicado."],
         ["audience", "A quién está dirigido", offering.audience, "El público al que se dirige este taller todavía no se ha publicado."],
         ["objectives", "Objetivos", offering.objectives, "Los objetivos de este taller todavía no se han publicado."],
@@ -246,7 +246,7 @@ function renderCatalog(catalog) {
         const dates = sessionDates(instance);
         const card = element("article", undefined, "course-card");
         card.style.setProperty("--workshop-accent", WORKSHOP_ACCENTS[offering.accent].color);
-        card.append(element("h3", instance.code), element("p", `${formatDate(dates[0])} – ${formatDate(dates.at(-1))}`), element("p", `${formatCadence(instance)} · ${instance.sessions} encuentros`), element("p", formatSchedule(instance)), element("p", formatPrice(instance.price)));
+        card.append(element("h3", instance.code), element("p", `${formatDate(dates[0])} – ${formatDate(dates.at(-1))}`), element("p", `${formatCadence(instance)} · ${instance.sessions} encuentros`), element("p", formatSchedule(instance)), element("p", formatWorkshopPrices(instance)));
         const signup = element("a", "Inscribirme en esta edición", "button");
         signup.setAttribute("aria-label", `Inscribirme en esta edición: ${instance.code}`);
         signup.href = `contacto.html?edicion=${encodeURIComponent(instance.id)}#inscripcion`;
@@ -316,7 +316,7 @@ function renderCatalog(catalog) {
 
 function signupEditionOption(instance, selected = false) {
   const option = new Option(`${instance.name} · ${instance.code} · ${formatDate(instance.startDate)}`, instance.id, selected, selected);
-  option.dataset.price = formatPrice(instance.price);
+  option.dataset.price = formatWorkshopPrices(instance);
   return option;
 }
 
@@ -325,7 +325,7 @@ function updateSignupPrice() {
   const price = document.querySelector("#signup-price");
   if (!select || !price) return;
   const amount = select.selectedOptions[0]?.dataset.price;
-  price.textContent = amount ? `Precio total de esta edición: ${amount}. La solicitud no realiza cobros.`
+  price.textContent = amount ? `Precios totales de esta edición: ${amount}. La solicitud no realiza cobros.`
     : select.value.startsWith("servicio:") ? "El precio del servicio se definirá en una propuesta personalizada. La solicitud no realiza cobros." : "";
   price.hidden = !price.textContent;
 }

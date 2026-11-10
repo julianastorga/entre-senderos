@@ -93,7 +93,7 @@ test("workshop accents accept only the coordinated green palette and preserve le
   assert.equal(validateWorkshop(legacy).accent, "pine");
 });
 
-test("new, legacy and imported workshops use the uniform USD 50 price", () => {
+test("legacy v1 workshops retain their original uniform USD price during migration", () => {
   for (const price of [120, 150, null, 0, undefined]) {
     assert.equal(validateWorkshop({ ...sample, price }).price, 50);
   }

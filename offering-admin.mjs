@@ -1,4 +1,4 @@
-import { WORKSHOP_ACCENTS } from "./workshops.mjs";
+import { WORKSHOP_ACCENTS, formatWorkshopPrices } from "./workshops.mjs";
 import { loadCatalog, validateOffering, validateProgram } from "./catalog-model.mjs";
 import { contentStorage, refreshCatalog, persistCatalog, storageLocation } from "./content-store.mjs";
 import { createCoverUpload } from "./image-upload.mjs";
@@ -17,6 +17,8 @@ export function createOfferingAdmin(kind, onSaved) {
     <div class="field"><label for="${prefix}-description">Descripción breve *</label><textarea id="${prefix}-description" name="description" rows="3" required maxlength="1500"></textarea></div>
     ${kind === "programs" ? `
     <div class="field"><label for="program-modality">Modalidad *</label><input id="program-modality" name="modality" required maxlength="120" value="Taller corto" placeholder="Taller corto"></div>
+    <div class="form-row"><div class="field"><label for="program-priceCRC">Precio por edición en colones (CRC)</label><input id="program-priceCRC" name="priceCRC" type="number" min="0" step="0.01" inputmode="decimal" aria-describedby="program-price-help"></div><div class="field"><label for="program-priceUSD">Precio por edición en dólares (USD)</label><input id="program-priceUSD" name="priceUSD" type="number" min="0" step="0.01" inputmode="decimal" aria-describedby="program-price-help"></div></div>
+    <p id="program-price-help" class="field-hint">Define cada importe por separado, con hasta dos decimales. Se aplican a todas las ediciones de este taller y se muestran en ambas monedas. No se convierte entre monedas; deja un campo vacío para indicar que está por confirmar. Usa 0 si no tiene costo.</p>
     <div class="field"><label for="program-overview">En qué consiste</label><textarea id="program-overview" name="overview" rows="5" maxlength="20000" placeholder="Qué se hará durante el taller y cómo se trabajará."></textarea></div>
     <div class="field"><label for="program-audience">A quién está dirigido</label><textarea id="program-audience" name="audience" rows="5" maxlength="20000" placeholder="Personas a quienes se dirige la propuesta y experiencia previa, si corresponde."></textarea></div>
     <div class="field"><label for="program-objectives">Objetivos</label><textarea id="program-objectives" name="objectives" rows="5" maxlength="20000" placeholder="Qué aprenderán y practicarán las personas participantes."></textarea></div>
@@ -61,7 +63,9 @@ export function createOfferingAdmin(kind, onSaved) {
     panel.inert = true;
     try {
       const validate = kind === "programs" ? validateProgram : validateOffering;
-      const offering = validate({ id: editing?.id || crypto.randomUUID(), ...Object.fromEntries(new FormData(form)), coverImage: cover.read() });
+      const values = { id: editing?.id || crypto.randomUUID(), ...Object.fromEntries(new FormData(form)), coverImage: cover.read() };
+      if (kind === "programs") for (const field of ["priceCRC", "priceUSD"]) values[field] = form.elements[field].value === "" ? null : form.elements[field].valueAsNumber;
+      const offering = validate(values);
       const catalog = await latestFor(editing);
       catalog[kind] = editing ? catalog[kind].map((item) => item.id === offering.id ? offering : item) : [...catalog[kind], offering];
       await persistCatalog(catalog);
@@ -96,6 +100,7 @@ export function createOfferingAdmin(kind, onSaved) {
           if (editing && !confirm("¿Descartar la edición actual?")) return;
           editing = structuredClone(offering);
           for (const key of ["name", "description", "details", "accent", ...(kind === "programs" ? ["modality", "overview", "audience", "objectives", "requiredReading"] : [])]) form.elements[key].value = offering[key];
+          if (kind === "programs") for (const field of ["priceCRC", "priceUSD"]) form.elements[field].value = offering[field] ?? "";
           cover.set(offering.coverImage);
           cancel.hidden = false; title.textContent = `Editar ${label}`; status.textContent = ""; form.elements.name.focus();
         });
@@ -121,7 +126,12 @@ export function createOfferingAdmin(kind, onSaved) {
         const actions = document.createElement("div"); actions.className = "button-row"; actions.append(edit, remove, link);
         card.append(category);
         if (offering.coverImage) card.append(imageElement(offering.coverImage, "workshop-cover"));
-        card.append(heading, description, actions); list.append(card);
+        card.append(heading, description);
+        if (kind === "programs") {
+          const prices = document.createElement("p"); prices.textContent = `Precios por edición: ${formatWorkshopPrices(offering)}`;
+          card.append(prices);
+        }
+        card.append(actions); list.append(card);
       }
       if (!catalog[kind].length) list.textContent = "No hay propuestas guardadas.";
     },

@@ -17,6 +17,8 @@ export function initPhoneInput(form) {
     placeholder();
     const phone = form.elements.phone;
     phone.setAttribute("aria-invalid", "false");
-    form.querySelector("#signup-phone-error").textContent = "";
+    const error = form.querySelector("#signup-phone-error, [data-phone-error]");
+    if (error) error.textContent = "";
   });
+  form.addEventListener("reset", () => queueMicrotask(placeholder));
 }

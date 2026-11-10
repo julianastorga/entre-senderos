@@ -204,19 +204,35 @@ export function formatDate(value) {
   return new Intl.DateTimeFormat("es-419", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" }).format(parseDate(value));
 }
 
-export function upcomingEditions(workshops, now = new Date()) {
+export function workshopToday(now = new Date()) {
   const parts = new Intl.DateTimeFormat("en", {
     timeZone: WORKSHOP_TIME_ZONE, year: "numeric", month: "2-digit", day: "2-digit",
   }).formatToParts(now);
   const date = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
-  const today = `${date.year.padStart(4, "0")}-${date.month}-${date.day}`;
-  return workshops.filter((workshop) => workshop.startDate >= today).sort((a, b) =>
-    a.startDate.localeCompare(b.startDate) || a.startTime.localeCompare(b.startTime) ||
-    a.code.localeCompare(b.code) || a.id.localeCompare(b.id));
+  return `${date.year.padStart(4, "0")}-${date.month}-${date.day}`;
 }
 
-export function formatPrice(value) {
-  return value === null ? "Por confirmar" : new Intl.NumberFormat("es-419", { style: "currency", currency: "USD" }).format(value) + " USD";
+function compareEditions(a, b) {
+  return a.startDate.localeCompare(b.startDate) || a.startTime.localeCompare(b.startTime) ||
+    a.code.localeCompare(b.code) || a.id.localeCompare(b.id);
+}
+
+export function upcomingEditions(workshops, now = new Date()) {
+  const today = workshopToday(now);
+  return workshops.filter((workshop) => workshop.startDate >= today).sort(compareEditions);
+}
+
+export function activeAndUpcomingEditions(workshops, now = new Date()) {
+  const today = workshopToday(now);
+  return workshops.filter((workshop) => sessionDates(workshop).at(-1) >= today).sort(compareEditions);
+}
+
+export function formatPrice(value, currency = "USD") {
+  return value === null ? `${currency}: por confirmar` : new Intl.NumberFormat("es-CR", { style: "currency", currency }).format(value) + ` ${currency}`;
+}
+
+export function formatWorkshopPrices(workshop) {
+  return `${formatPrice(workshop.priceCRC, "CRC")} · ${formatPrice(workshop.priceUSD, "USD")}`;
 }
 
 export function formatSchedule(workshop) {
