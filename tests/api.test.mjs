@@ -7,6 +7,7 @@ import { migrateWorkshops } from "../catalog-model.mjs";
 import { DEFAULT_WORKSHOPS } from "../workshops.mjs";
 import { validateNewsletterEmail } from "../email-validation.mjs";
 import { verifyMailDomain } from "../server/mail-domain.mjs";
+import { DEFAULT_PAGE_COPY } from "../page-copy-model.mjs";
 
 class MemoryStore {
   data = new Map();
@@ -388,6 +389,48 @@ test("reaction writes reject invalid input, cross-site requests, unavailable pos
   assert.equal((await api(request("editorial/reactions", "GET", null, {}, { id: text.id }))).status, 200);
   await api(request("showcase", "PUT", { version: 1, texts: [] }, { ...admin, "if-match": saved.headers.ETag }));
   assert.equal((await api(request("editorial/reactions", "PUT", { reaction: "heart", active: true }, {}, { id: text.id }))).status, 404);
+});
+
+test("page copy is publicly readable, independently versioned and writable only by authorized administrators", async () => {
+  const { api, store } = create();
+  const initial = await api(request("settings/pages"));
+  assert.equal(initial.status, 200);
+  assert.deepEqual(initial.body, DEFAULT_PAGE_COPY);
+  assert.equal(initial.headers["Cache-Control"], "no-store");
+  assert.equal(store.data.has("page-copy"), false);
+  const catalog = await api(request("catalog"));
+  const input = structuredClone(initial.body);
+  input.pages.home.title = "Un nuevo espacio";
+  input.pages.services.intro = "Una propuesta a medida.";
+  input.pages.workshops.eyebrow = "";
+  input.pages.team.body = "Primera parte.\n\nSegunda parte.";
+  assert.equal((await api(request("settings/pages", "PUT", input))).status, 401);
+  assert.equal((await api(request("settings/pages", "PUT", input, { ...admin, "x-ms-client-principal": github("another-user") }))).status, 403);
+  assert.equal((await api(request("settings/pages", "PUT", input, { "x-ms-client-principal": admin["x-ms-client-principal"] }))).status, 428);
+  assert.equal((await api(request("settings/pages", "PUT", input, { ...admin, "sec-fetch-site": "cross-site" }))).status, 403);
+  assert.equal((await api(request("settings/pages", "PUT", input, { ...admin, "content-type": "text/plain" }))).status, 415);
+  assert.equal((await api(request("settings/pages", "POST", input, admin))).status, 405);
+  const saved = await api(request("settings/pages", "PUT", input, { ...admin, "if-match": initial.headers.ETag }));
+  assert.equal(saved.status, 200);
+  assert.deepEqual(saved.body, input);
+  assert.equal(saved.headers["Cache-Control"], "no-store");
+  assert.notEqual(saved.headers.ETag, initial.headers.ETag);
+  assert.deepEqual((await api(request("settings/pages"))).body, input);
+  assert.deepEqual((await api(request("catalog"))).body, catalog.body);
+  assert.equal((await api(request("settings/pages", "PUT", initial.body, { ...admin, "if-match": initial.headers.ETag }))).status, 409);
+  assert.deepEqual((await api(request("settings/pages"))).body, input);
+});
+
+test("invalid page copy cannot replace saved public text or expose unrelated configuration", async () => {
+  const { api } = create();
+  const initial = await api(request("settings/pages"));
+  for (const invalid of [null, { version: 1, pages: [] }, { ...initial.body, internal: "private" },
+    { version: 1, pages: { unknown: {} } }, { version: 1, pages: { home: { title: "" } } },
+    { version: 1, pages: { home: { title: "x".repeat(151) } } },
+    { version: 1, pages: { team: { body: "x".repeat(50001) } } }]) {
+    assert.equal((await api(request("settings/pages", "PUT", invalid, admin))).status, 400);
+  }
+  assert.deepEqual((await api(request("settings/pages"))).body, initial.body);
 });
 
 test("managed images require authenticated uploads, bounded valid bytes and accessible covers; contacts use conditional writes", async () => {

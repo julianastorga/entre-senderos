@@ -64,11 +64,12 @@ await rm(target("dist"), { recursive: true, force: true });
 await mkdir(target("dist", "assets"), { recursive: true });
 const frontend = [
   "styles.css", "site.js", "workshops.mjs", "calendar.mjs", "admin.mjs", "featured-text.mjs",
-  "featured-admin.mjs", "text-import.mjs", "content-store.mjs", "email-validation.mjs", "image-model.mjs", "image-upload.mjs",
+  "featured-admin.mjs", "text-import.mjs", "content-store.mjs", "email-validation.mjs", "image-model.mjs", "image-upload.mjs", "inline-image-editor.mjs",
   "catalog-model.mjs", "offering-admin.mjs", "contact-model.mjs", "contact-settings.mjs",
   "admin-settings.mjs", "newsletter-actions.mjs",
   "editorial-model.mjs", "reaction-model.mjs", "reactions.mjs", "sample-posts.mjs",
   "loading.mjs", "enrollment-admin.mjs", "enrollment-model.mjs",
+  "page-copy-model.mjs", "page-copy.mjs", "page-copy-admin.mjs",
   "index.html", "cursos.html", "servicios.html", "propuesta.html", "calendario.html",
   "muestra.html", "texto.html", "acerca-de.html", "contacto.html", "newsletter.html", "admin.html",
 ];

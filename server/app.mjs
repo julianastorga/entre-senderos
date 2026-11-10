@@ -15,6 +15,7 @@ import { editorialPage, externalLink, postMetadata } from "../editorial-model.mj
 import { REACTIONS, emptyReactions, reactionSummary, setReaction } from "../reaction-model.mjs";
 import { validatePhone } from "../phone-model.mjs";
 import { enrollmentStatus, validEnrollmentId, validateEnrollmentStatus, validateEnrollmentContact, validatePaymentMethod, editionAssignment } from "../enrollment-model.mjs";
+import { DEFAULT_PAGE_COPY, validatePageCopy } from "../page-copy-model.mjs";
 
 const newsletterCookie = "__Secure-entre_senderos_newsletter";
 const reactionsCookie = "__Host-entre_senderos_reactions";
@@ -261,6 +262,23 @@ export function createApi({
           return { ...text, excerpt: words.slice(0, 40).join(" ") + (words.length > 40 ? "…" : ""), meta: `${count.toLocaleString("es-419")} palabras · ${minutes} ${minutes === 1 ? "minuto" : "minutos"} de lectura` };
         }
         return response(200, { ...page, featured: page.featured ? summarize(page.featured) : null, items: page.items.map(summarize) });
+      }
+      if (path === "settings/pages") {
+        if (method === "GET") {
+          const result = await store.read("page-copy", DEFAULT_PAGE_COPY);
+          return response(200, validatePageCopy(result.value), result.version);
+        }
+        requireAdmin();
+        if (method !== "PUT") throw new HttpError(405, "Método no admitido.");
+        requireJson();
+        if (!headers["if-match"]) throw new HttpError(428, "Recarga los textos antes de guardar.");
+        let value;
+        try {
+          if (!req.body || JSON.stringify(req.body).length > 50_000) throw new Error("Los textos superan el tamaño permitido.");
+          value = validatePageCopy(req.body);
+        } catch (error) { throw new HttpError(400, error.message); }
+        const saved = await store.write("page-copy", value, headers["if-match"]);
+        return response(200, saved.value, saved.version);
       }
       if (path === "settings/contacts") {
         if (method === "GET") {

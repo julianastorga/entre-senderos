@@ -34,6 +34,10 @@ p + p { margin-top: 16px; }
 .page-intro .eyebrow { margin-bottom: 15px; }
 .page-intro > p:last-child, .page-intro h1 + p { color: var(--muted); max-width: 690px; margin-top: 22px; }
 .home-intro { padding-block: 75px 62px; }
+[data-page-copy-field] { overflow-wrap: anywhere; }
+[data-page-copy-field="intro"], [data-page-copy-field="body"] p { white-space: pre-line; }
+.page-copy-page { margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--line); }
+.page-copy-page legend { padding-right: 15px; font-size: 24px; }
 .eyebrow { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .1em; color: var(--moss); }
 .button-row { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; margin-top: 27px; }
 .button { display: inline-flex; align-items: center; justify-content: center; gap: 15px; min-height: 48px; padding: 11px 20px; background: var(--ink); color: var(--paper); border: 1px solid var(--ink); border-radius: 3px; font-size: 16px; text-decoration: none; font-weight: 500; }
@@ -201,6 +205,10 @@ fieldset { margin: 0; padding: 0; border: 0; min-width: 0; }
 .image-controls { min-width: 0; border: 1px solid var(--line); padding: 18px; margin-block: 20px; }
 .image-controls legend { padding-inline: 8px; font-size: 16px; }
 .inline-image-panel, .inline-link-panel { margin: 12px; }
+.image-move-help { margin: 12px; }
+.rich-editor img { cursor: pointer; }
+.rich-editor img.editor-image-selected { outline: 3px solid var(--ink); outline-offset: 3px; }
+#inline-image-selected { overflow-wrap: anywhere; }
 .cover-preview-image { display: block; max-width: 100%; height: auto; max-height: 220px; margin-bottom: 12px; }
 .admin-workshop .button-row { align-items: baseline; gap: 18px; margin-top: 16px; }
 .admin-workshop .button-row .button { margin-top: 0; }

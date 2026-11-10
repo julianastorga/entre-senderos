@@ -1,6 +1,6 @@
 import { CLOUD_MODE } from "./app-config.mjs";
 import { apiRequest } from "./content-store.mjs";
-import { MAX_IMAGE_BYTES, MAX_IMAGE_FILE_BYTES, imageMime, imageElement, validateImage } from "./image-model.mjs";
+import { MAX_IMAGE_BYTES, validateImageFile, imageMime, imageElement, validateImage } from "./image-model.mjs";
 
 function dataUrl(blob) {
   return new Promise((resolve, reject) => {
@@ -12,7 +12,7 @@ function dataUrl(blob) {
 }
 
 export async function uploadImage(file) {
-  if (!file || !file.size || file.size > MAX_IMAGE_FILE_BYTES) throw new Error("Elige una imagen JPG, PNG o WebP de hasta 8 MB.");
+  validateImageFile(file);
   const bytes = new Uint8Array(await file.arrayBuffer());
   const mimeType = imageMime(bytes);
   if (!mimeType) throw new Error("Solo se admiten imágenes JPG, PNG y WebP; SVG y otros formatos no están permitidos.");
@@ -44,7 +44,7 @@ export async function uploadImage(file) {
       }
       scale *= 0.7;
     }
-    throw new Error("La imagen sigue siendo demasiado grande. Elige otra imagen de menor tamaño.");
+    throw new Error(`No se pudo reducir la imagen al límite de ${MAX_IMAGE_BYTES / 1000} KB. Elige otra de menor tamaño o resolución.`);
   } finally {
     bitmap.close();
   }

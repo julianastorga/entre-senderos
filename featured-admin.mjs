@@ -5,7 +5,8 @@ import {
 import { importTextFile } from "./text-import.mjs";
 import { contentStorage, refreshShowcase, persistShowcase, storageLocation } from "./content-store.mjs";
 import { createCoverUpload, uploadImage } from "./image-upload.mjs";
-import { imageElement, MAX_STORY_IMAGES } from "./image-model.mjs";
+import { imageElement, MAX_STORY_IMAGES, validateImageFile } from "./image-model.mjs";
+import { createInlineImageEditor } from "./inline-image-editor.mjs";
 import { externalLink, publicationDate } from "./editorial-model.mjs";
 import { DEFAULT_POSTS } from "./sample-posts.mjs";
 import { beginLoading } from "./loading.mjs";
@@ -34,6 +35,8 @@ export async function createFeaturedAdmin() {
   const imagePanel = document.querySelector("#inline-image-panel");
   const imageFile = document.querySelector("#inline-image-file");
   const imageAlt = document.querySelector("#inline-image-alt");
+  const imageError = document.querySelector("#inline-image-error");
+  const insertImage = document.querySelector("#insert-inline-image");
   const linkTool = toolbar.querySelector("[data-text-link]");
   const linkPanel = document.querySelector("#inline-link-panel");
   const linkUrl = document.querySelector("#inline-link-url");
@@ -47,6 +50,19 @@ export async function createFeaturedAdmin() {
   let loaded = false;
   const panel = form.closest('[role="tabpanel"]');
   const cover = createCoverUpload(form, "text", status, () => { permission.checked = false; markChanged(); });
+  const inlineImages = createInlineImageEditor(editor, markChanged);
+
+  function clearImageError() {
+    imageError.textContent = "";
+    imagePanel.querySelectorAll("[aria-invalid]").forEach((node) => node.removeAttribute("aria-invalid"));
+  }
+  function reportImageError(message, invalid = null) {
+    imageError.textContent = message;
+    if (invalid) {
+      invalid.setAttribute("aria-invalid", "true");
+      invalid.focus();
+    }
+  }
 
   function updateToolbar() {
     const selection = window.getSelection();
@@ -84,6 +100,7 @@ export async function createFeaturedAdmin() {
     imageFile.value = "";
     imageAlt.value = "";
     imageRange = null;
+    clearImageError();
     linkPanel.hidden = true;
     linkTool.setAttribute("aria-expanded", "false");
     linkUrl.value = "";
@@ -92,6 +109,7 @@ export async function createFeaturedAdmin() {
     permission.checked = Boolean(text?.permissionConfirmed);
     sample.checked = Boolean(text?.sample);
     editor.replaceChildren(textFragment(text?.html || ""));
+    inlineImages.clear();
     editor.contentEditable = "true";
     fields.disabled = false;
     dirty = false;
@@ -308,13 +326,33 @@ export async function createFeaturedAdmin() {
       imageTool.setAttribute("aria-expanded", "false");
       imageTool.focus();
     });
-    document.querySelector("#insert-inline-image").addEventListener("click", async () => {
+    imageFile.addEventListener("change", () => {
+      clearImageError();
+      if (!imageFile.files[0]) return;
+      try { validateImageFile(imageFile.files[0]); }
+      catch (error) { reportImageError(error.message, imageFile); }
+    });
+    imageAlt.addEventListener("input", () => {
+      imageAlt.removeAttribute("aria-invalid");
+    });
+    insertImage.addEventListener("click", async () => {
+      clearImageError();
       if (!imageFile.files[0] || !imageAlt.value.trim()) {
-        status.textContent = "Elige un archivo y describe la imagen antes de insertarla.";
-        (!imageFile.files[0] ? imageFile : imageAlt).focus();
+        reportImageError("Elige un archivo y describe la imagen antes de insertarla.", !imageFile.files[0] ? imageFile : imageAlt);
+        return;
+      }
+      try { validateImageFile(imageFile.files[0]); }
+      catch (error) {
+        reportImageError(error.message, imageFile);
+        return;
+      }
+      if (imageAlt.value.trim().length > 250) {
+        reportImageError("Describe la imagen con entre 1 y 250 caracteres.", imageAlt);
         return;
       }
       panel.inert = true;
+      imagePanel.setAttribute("aria-busy", "true");
+      insertImage.textContent = "Preparando imagen…";
       status.textContent = "Preparando la imagen…";
       try {
         if (editor.querySelectorAll("img").length >= MAX_STORY_IMAGES) throw new Error(`El relato admite hasta ${MAX_STORY_IMAGES} imágenes internas.`);
@@ -328,6 +366,7 @@ export async function createFeaturedAdmin() {
         selection.removeAllRanges();
         selection.addRange(range);
         if (!document.execCommand("insertHTML", false, `${image.outerHTML}<p><br></p>`)) throw new Error("No se pudo insertar la imagen en el editor.");
+        inlineImages.refresh();
         permission.checked = false;
         imagePanel.hidden = true;
         imageTool.setAttribute("aria-expanded", "false");
@@ -338,8 +377,12 @@ export async function createFeaturedAdmin() {
         status.textContent = "Imagen insertada. Revisa su descripción y confirma el permiso antes de guardar.";
       } catch (error) {
         status.textContent = `No se insertó la imagen. ${error.message}`;
+        reportImageError(`No se insertó la imagen. ${error.message} El texto y los datos de la imagen se conservaron; puedes corregirlos y reintentar.`);
       } finally {
         panel.inert = false;
+        imagePanel.removeAttribute("aria-busy");
+        insertImage.textContent = "Insertar en el texto";
+        if (imageError.textContent) imageFile.focus();
       }
     });
   document.addEventListener("selectionchange", updateToolbar);
@@ -374,6 +417,7 @@ export async function createFeaturedAdmin() {
         return;
       }
       editor.replaceChildren(textFragment(html));
+      inlineImages.clear();
       if (!title.value.trim()) title.value = file.name.replace(/\.[^.]+$/u, "").slice(0, 150);
       permission.checked = false;
       markChanged();
