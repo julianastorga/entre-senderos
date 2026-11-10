@@ -1,4 +1,4 @@
-import { STORAGE_KEY, WORKSHOP_ACCENTS, sessionDates, formatDate, formatPrice, formatSchedule, formatCadence } from "./workshops.mjs";
+import { STORAGE_KEY, WORKSHOP_ACCENTS, WORKSHOP_PRICE, sessionDates, upcomingEditions, formatDate, formatPrice, formatSchedule, formatCadence } from "./workshops.mjs";
 import { CATALOG_KEY, loadCatalog, flattenInstances } from "./catalog-model.mjs";
 import { createCalendar } from "./calendar.mjs";
 import { createAdmin } from "./admin.mjs";
@@ -19,7 +19,7 @@ initNavigation();
 const initialCatalogLoading = [
   ...[...document.querySelectorAll("[data-workshop-cards], [data-service-cards]")].map((target) => beginLoading(target, { label: "Cargando propuestas" })),
   beginLoading(document.querySelector("[data-offering-detail]"), { label: "Cargando taller", shape: "article", count: 1 }),
-  beginLoading(document.querySelector("[data-pricing-rows]")?.closest(".table-scroll"), { label: "Cargando fechas y precios", shape: "lines" }),
+  beginLoading(document.querySelector("[data-upcoming-editions]"), { label: "Cargando próximas ediciones", shape: "lines" }),
   beginLoading(document.querySelector("#signup-course")?.closest(".field"), { label: "Cargando ediciones disponibles", shape: "lines", count: 1 }),
 ];
 
@@ -27,7 +27,7 @@ let canAdminister = true;
 if (CLOUD_MODE) {
   document.querySelector(".preview-bar").textContent = "Aplicación de demostración · Contenido compartido en Azure · Identidad por definir";
   document.querySelectorAll('.footer-links a[href="admin.html"]').forEach((link) => { link.textContent = "Administración"; });
-  if (document.querySelector("[data-pricing-rows]")) document.querySelector(".page-intro > p:last-child").textContent = "Consulta la descripción, la frecuencia y las fechas de cada propuesta. Los cambios de administración se comparten aquí y en el calendario.";
+  if (document.querySelector("[data-upcoming-editions]")) document.querySelector(".page-intro > p:last-child").textContent = "Consulta la descripción, la frecuencia y las fechas de cada propuesta. Los cambios de administración se comparten aquí y en el calendario.";
   if (document.querySelector(".backup-section > p")) document.querySelector(".backup-section > p").textContent = "Exporta el catálogo como copia de seguridad. Importar reemplaza el catálogo compartido de este entorno de Azure. El archivo no incluye los textos de la muestra.";
   if (document.querySelector("#workshop-form")) {
     canAdminister = false;
@@ -164,6 +164,7 @@ function element(tag, text, className) {
 
 function renderCatalog(catalog) {
   const workshops = flattenInstances(catalog);
+  const upcoming = upcomingEditions(workshops);
   for (const [selector, offerings, type] of [["[data-workshop-cards]", catalog.programs, "taller"], ["[data-service-cards]", catalog.services, "servicio"]]) {
     document.querySelectorAll(selector).forEach((container) => {
       container.replaceChildren();
@@ -174,8 +175,8 @@ function renderCatalog(catalog) {
       card.append(element("p", type === "taller" ? "Taller de escritura" : "Servicio personalizado", "eyebrow"));
       if (offering.coverImage) card.append(imageElement(offering.coverImage, "workshop-cover"));
       card.append(element("h3", offering.name), element("p", offering.description));
-      const count = workshops.filter((instance) => instance.programId === offering.id).length;
-      card.append(element("p", type === "servicio" ? "Consulta el formato y las condiciones." : count ? `${count} ${count === 1 ? "edición disponible" : "ediciones disponibles"} · US$50 por edición` : "Próximas fechas por anunciar.", "small-print"));
+      const count = upcoming.filter((instance) => instance.programId === offering.id).length;
+      card.append(element("p", type === "servicio" ? "Consulta el formato y las condiciones." : count ? `${count} ${count === 1 ? "próxima edición" : "próximas ediciones"}` : "Próximas fechas por anunciar.", "small-print"));
       const link = element("a", type === "taller" ? "Conocer el taller y sus ediciones" : "Conocer el servicio", "text-link");
       link.href = `propuesta.html?tipo=${type}&id=${encodeURIComponent(offering.id)}`;
       link.setAttribute("aria-label", `${link.textContent}: ${offering.name}`);
@@ -209,6 +210,7 @@ function renderCatalog(catalog) {
       if (!offering.coverImage) detail.append(element("p", "Portada de ejemplo · Imagen del taller por definir.", "small-print offering-cover-caption"));
       for (const [id, label, value, pending] of [
         ["modality", "Modalidad", offering.modality, ""],
+        ["price", "Precio por edición", formatPrice(WORKSHOP_PRICE), ""],
         ["overview", "En qué consiste", offering.overview, "La descripción de la dinámica de este taller todavía no se ha publicado."],
         ["audience", "A quién está dirigido", offering.audience, "El público al que se dirige este taller todavía no se ha publicado."],
         ["objectives", "Objetivos", offering.objectives, "Los objetivos de este taller todavía no se han publicado."],
@@ -253,21 +255,37 @@ function renderCatalog(catalog) {
       editions.append(grid); detail.append(editions);
     }
   }
-  const prices = document.querySelector("[data-pricing-rows]");
-  if (prices) {
-    prices.replaceChildren();
-    workshops.forEach((workshop) => {
+  const editions = document.querySelector("[data-upcoming-editions]");
+  if (editions) {
+    editions.replaceChildren();
+    if (!upcoming.length) editions.append(element("li", "No hay próximas ediciones programadas. Las nuevas fechas se publicarán aquí.", "empty-state"));
+    upcoming.forEach((workshop) => {
       const dates = sessionDates(workshop);
-      const row = element("tr");
-      const title = element("th", workshop.name);
-      title.className = "workshop-cell";
-      title.style.setProperty("--workshop-accent", WORKSHOP_ACCENTS[workshop.accent].color);
-      title.scope = "row";
-      title.append(element("small", ` · ${workshop.code}`));
-      row.append(title, element("td", `${formatCadence(workshop)} · ${workshop.sessions} encuentros`),
-        element("td", `${formatDate(dates[0])} – ${formatDate(dates.at(-1))}`),
-        element("td", formatSchedule(workshop)), element("td", formatPrice(workshop.price)));
-      prices.append(row);
+      const row = element("li", undefined, "upcoming-edition");
+      row.style.setProperty("--workshop-accent", WORKSHOP_ACCENTS[workshop.accent].color);
+      const summary = element("div");
+      const title = element("h3");
+      const link = element("a", workshop.name);
+      link.href = `propuesta.html?tipo=taller&id=${encodeURIComponent(workshop.programId)}`;
+      title.append(link);
+      summary.append(element("p", workshop.code, "eyebrow"), title, element("p", `${formatCadence(workshop)} · ${workshop.sessions} encuentros`));
+      const schedule = element("div");
+      const range = element("dl");
+      for (const [label, date] of [["Inicio", dates[0]], ["Cierre", dates.at(-1)]]) {
+        const entry = element("div");
+        const value = element("dd");
+        const time = element("time", formatDate(date));
+        time.dateTime = date;
+        value.append(time);
+        entry.append(element("dt", label), value);
+        range.append(entry);
+      }
+      schedule.append(range, element("p", formatSchedule(workshop)));
+      const signup = element("a", "Inscribirme", "button");
+      signup.setAttribute("aria-label", `Inscribirme: ${workshop.name} · ${workshop.code}`);
+      signup.href = `contacto.html?edicion=${encodeURIComponent(workshop.id)}#inscripcion`;
+      row.append(summary, schedule, signup);
+      editions.append(row);
     });
   }
   const select = document.querySelector("#signup-course");
@@ -282,20 +300,41 @@ function renderCatalog(catalog) {
       const instance = workshops.find((item) => item.id === editionId);
       const service = catalog.services.find((item) => item.id === serviceId);
       if (!instance && !service) throw new Error("La edición o el servicio de este enlace ya no está disponible.");
-      select.replaceChildren(new Option(instance ? `${instance.name} · ${instance.code} · ${formatDate(instance.startDate)}` : service.name, instance?.id || `servicio:${service.id}`, true, true));
+      select.replaceChildren(instance ? signupEditionOption(instance, true) : new Option(service.name, `servicio:${service.id}`, true, true));
       document.querySelector("#inscripcion h2").textContent = instance ? `Inscripción: ${instance.name} · ${instance.code}` : `Consulta: ${service.name}`;
-      if (instance) document.querySelector(".form-intro").textContent = `${formatDate(instance.startDate)} · ${formatCadence(instance)} · ${formatSchedule(instance)} · US$50. La solicitud no confirma un lugar ni realiza un cobro.`;
+      if (instance) document.querySelector(".form-intro").textContent = `${formatDate(instance.startDate)} · ${formatCadence(instance)} · ${formatSchedule(instance)}. La solicitud no confirma un lugar ni realiza un cobro.`;
+      updateSignupPrice();
       return;
     }
-    workshops.forEach((workshop) => select.add(new Option(`${workshop.name} · ${workshop.code} · ${formatDate(workshop.startDate)}`, workshop.id)));
+    workshops.forEach((workshop) => select.add(signupEditionOption(workshop)));
     catalog.services.forEach((service) => select.add(new Option(`Servicio: ${service.name}`, `servicio:${service.id}`)));
     select.add(new Option("Me gustaría recibir orientación", "orientacion"));
     if ([...select.options].some((option) => option.value === selected)) select.value = selected;
+    updateSignupPrice();
   }
 }
 
+function signupEditionOption(instance, selected = false) {
+  const option = new Option(`${instance.name} · ${instance.code} · ${formatDate(instance.startDate)}`, instance.id, selected, selected);
+  option.dataset.price = formatPrice(instance.price);
+  return option;
+}
+
+function updateSignupPrice() {
+  const select = document.querySelector("#signup-course");
+  const price = document.querySelector("#signup-price");
+  if (!select || !price) return;
+  const amount = select.selectedOptions[0]?.dataset.price;
+  price.textContent = amount ? `Precio total de esta edición: ${amount}. La solicitud no realiza cobros.`
+    : select.value.startsWith("servicio:") ? "El precio del servicio se definirá en una propuesta personalizada. La solicitud no realiza cobros." : "";
+  price.hidden = !price.textContent;
+}
+
+document.querySelector("#signup-course")?.addEventListener("change", updateSignupPrice);
+
 document.querySelectorAll("[data-preview-form]").forEach((form) => {
   initPhoneInput(form);
+  if (form.elements.course) form.addEventListener("reset", () => queueMicrotask(updateSignupPrice));
   const requiredFields = [...form.querySelectorAll("[required]")];
   const status = form.querySelector(".form-status");
   let newsletterSubmitted = false;
@@ -446,9 +485,12 @@ async function refreshWorkshops() {
   } catch (error) {
     alert.textContent = `No se pudo cargar el catálogo. ${error.message} No se han sustituido tus datos. ${CLOUD_MODE ? "Revisa la conexión y vuelve a intentarlo." : "Revisa el almacenamiento del navegador o importa una copia válida desde Administración local."}`;
     alert.hidden = false;
-    document.querySelectorAll("[data-workshop-cards], [data-service-cards], [data-offering-detail], [data-pricing-rows]").forEach((container) => container.replaceChildren());
+    document.querySelectorAll("[data-workshop-cards], [data-service-cards], [data-offering-detail], [data-upcoming-editions]").forEach((container) => container.replaceChildren());
     const select = document.querySelector("#signup-course");
-    if (select) select.replaceChildren(new Option("Catálogo no disponible", ""));
+    if (select) {
+      select.replaceChildren(new Option("Catálogo no disponible", ""));
+      updateSignupPrice();
+    }
     calendar?.unavailable();
     admin?.lock();
   } finally {
@@ -456,7 +498,7 @@ async function refreshWorkshops() {
     finish.forEach((done) => done());
   }
 }
-if (document.querySelector("[data-workshop-cards], [data-service-cards], [data-offering-detail], [data-pricing-rows], #signup-course, #calendar-grid, #workshop-form")) {
+if (document.querySelector("[data-workshop-cards], [data-service-cards], [data-offering-detail], [data-upcoming-editions], #signup-course, #calendar-grid, #workshop-form")) {
   await refreshWorkshops();
   window.addEventListener("content-changed", refreshWorkshops);
   if (CLOUD_MODE) window.addEventListener("focus", refreshWorkshops);

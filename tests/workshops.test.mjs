@@ -2,10 +2,38 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   DEFAULT_WORKSHOPS, STORAGE_KEY, WorkshopValidationError, sessionDates,
-  parseDate, validateWorkshop, validateCatalog, loadWorkshops, saveWorkshops, formatSchedule,
+  parseDate, validateWorkshop, validateCatalog, loadWorkshops, saveWorkshops, formatSchedule, upcomingEditions,
 } from "../workshops.mjs";
 
 const sample = { ...DEFAULT_WORKSHOPS[0] };
+
+test("upcoming editions include today until midnight in Costa Rica, not UTC or the browser timezone", () => {
+  const editions = [
+    { ...sample, id: "yesterday", startDate: "2026-12-30" },
+    { ...sample, id: "today", startDate: "2026-12-31", startTime: "08:00" },
+    { ...sample, id: "tomorrow", startDate: "2027-01-01" },
+  ];
+  assert.deepEqual(upcomingEditions(editions, new Date("2027-01-01T05:59:59Z")).map(({ id }) => id), ["today", "tomorrow"]);
+  assert.deepEqual(upcomingEditions(editions, new Date("2027-01-01T06:00:00Z")).map(({ id }) => id), ["tomorrow"]);
+});
+
+test("upcoming editions sort by start date, time and code without mutating the catalog", () => {
+  const editions = [
+    { ...sample, id: "later", startDate: "2027-02-01" },
+    { ...sample, id: "evening", startDate: "2027-01-19", startTime: "18:00" },
+    { ...sample, id: "b", code: "B-01", startDate: "2027-01-19", startTime: "08:00" },
+    { ...sample, id: "a", code: "A-01", startDate: "2027-01-19", startTime: "08:00" },
+  ];
+  const before = structuredClone(editions);
+  assert.deepEqual(upcomingEditions(editions, new Date("2027-01-01T12:00:00Z")).map(({ id }) => id), ["a", "b", "evening", "later"]);
+  assert.deepEqual(editions, before);
+});
+
+test("empty or already-started catalogs have no upcoming editions, including editions still in progress", () => {
+  const now = new Date("2027-01-20T12:00:00Z");
+  assert.deepEqual(upcomingEditions([], now), []);
+  assert.deepEqual(upcomingEditions([{ ...sample, startDate: "2027-01-19", sessions: 6 }], now), []);
+});
 
 test("weekly and fortnightly sessions cross months and years without changing the weekday", () => {
   assert.deepEqual(sessionDates({ ...sample, startDate: "2027-12-28", sessions: 3 }), ["2027-12-28", "2028-01-04", "2028-01-11"]);
