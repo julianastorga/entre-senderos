@@ -10,8 +10,18 @@ import { validateNewsletterEmail } from "./email-validation.mjs";
 import { imageElement } from "./image-model.mjs";
 import { loadContacts } from "./contact-settings.mjs";
 import { createSettingsAdmin } from "./admin-settings.mjs";
+import { createEnrollmentAdmin } from "./enrollment-admin.mjs";
+import { initPhoneInput, validatePhone } from "./assets/phone-input.js";
+import { beginLoading } from "./loading.mjs";
 
 document.documentElement.classList.add("js");
+initNavigation();
+const initialCatalogLoading = [
+  ...[...document.querySelectorAll("[data-workshop-cards], [data-service-cards]")].map((target) => beginLoading(target, { label: "Cargando propuestas" })),
+  beginLoading(document.querySelector("[data-offering-detail]"), { label: "Cargando taller", shape: "article", count: 1 }),
+  beginLoading(document.querySelector("[data-pricing-rows]")?.closest(".table-scroll"), { label: "Cargando fechas y precios", shape: "lines" }),
+  beginLoading(document.querySelector("#signup-course")?.closest(".field"), { label: "Cargando ediciones disponibles", shape: "lines", count: 1 }),
+];
 
 let canAdminister = true;
 if (CLOUD_MODE) {
@@ -22,6 +32,7 @@ if (CLOUD_MODE) {
   if (document.querySelector("#workshop-form")) {
     canAdminister = false;
     const notice = document.querySelector("main > .notice");
+    const finish = beginLoading(notice, { label: "Comprobando acceso de administración", shape: "lines", count: 1 });
     try {
       const { value: session } = await apiRequest("session");
       canAdminister = session.admin;
@@ -52,7 +63,7 @@ if (CLOUD_MODE) {
       }
     } catch (error) {
       notice.textContent = `No se pudo comprobar la sesión. ${error.message}`;
-    }
+    } finally { finish(); }
   }
 }
 
@@ -75,6 +86,7 @@ document.querySelector("#demo-login-form")?.addEventListener("submit", async (ev
   }
 });
 
+function initNavigation() {
 const menuToggle = document.querySelector(".menu-toggle");
 const navigation = document.querySelector("#site-nav");
 
@@ -99,19 +111,15 @@ if (menuToggle && navigation) {
   });
   window.matchMedia("(min-width: 801px)").addEventListener("change", closeMenu);
 }
+}
 
+let contactsLoaded = false;
 async function refreshContacts() {
   if (!document.querySelector("[data-whatsapp-link], [data-contact-email]")) return;
-  let contact = { whatsappNumber: "", email: "" };
-  let failed = false;
-  try { contact = await loadContacts(); }
-  catch (error) {
-    failed = true;
-    let notice = document.querySelector("#contact-error");
-    if (!notice) { notice = element("p", undefined, "notice error-notice"); notice.id = "contact-error"; notice.setAttribute("role", "alert"); document.querySelector("main").prepend(notice); }
-    notice.hidden = false; notice.textContent = `No se pudieron cargar los contactos. ${error.message}`;
-  }
-  if (!failed && document.querySelector("#contact-error")) document.querySelector("#contact-error").hidden = true;
+  const finish = [...document.querySelectorAll("#whatsapp, .email-card")].map((target) => beginLoading(target, { label: "Cargando contactos", shape: "lines", count: 1, show: !contactsLoaded }));
+  try {
+  const contact = await loadContacts();
+  if (document.querySelector("#contact-error")) document.querySelector("#contact-error").hidden = true;
   document.querySelectorAll("[data-whatsapp-link]").forEach((link) => {
     if (!contact.whatsappNumber) link.removeAttribute("href");
     else link.href = `https://wa.me/${contact.whatsappNumber}?text=${encodeURIComponent("Hola. Me gustaría saber más sobre los talleres de escritura.")}`;
@@ -129,8 +137,21 @@ async function refreshContacts() {
     link.textContent = contact.email;
     paragraph.replaceChildren(link);
   });
+  contactsLoaded = true;
+  }
+  catch (error) {
+    let notice = document.querySelector("#contact-error");
+    if (!notice) { notice = element("p", undefined, "notice error-notice"); notice.id = "contact-error"; notice.setAttribute("role", "alert"); document.querySelector("main").prepend(notice); }
+    notice.hidden = false; notice.textContent = `No se pudieron cargar los contactos. ${error.message}`;
+    if (!contactsLoaded) {
+      document.querySelectorAll("[data-whatsapp-pending]").forEach((label) => { label.hidden = true; });
+      const status = document.querySelector("#whatsapp-status");
+      if (status) status.textContent = "No se pudo cargar el contacto de WhatsApp.";
+      document.querySelectorAll("[data-contact-email]").forEach((paragraph) => { paragraph.textContent = "No se pudo cargar el correo público."; });
+    }
+  } finally { finish.forEach((done) => done()); }
 }
-await refreshContacts();
+const contactsReady = refreshContacts();
 window.addEventListener("contacts-changed", refreshContacts);
 window.addEventListener("storage", (event) => { if (event.key === "writing-contact-settings:v1" || event.key === null) refreshContacts(); });
 
@@ -188,6 +209,8 @@ function renderCatalog(catalog) {
       if (!offering.coverImage) detail.append(element("p", "Portada de ejemplo · Imagen del taller por definir.", "small-print offering-cover-caption"));
       for (const [id, label, value, pending] of [
         ["modality", "Modalidad", offering.modality, ""],
+        ["overview", "En qué consiste", offering.overview, "La descripción de la dinámica de este taller todavía no se ha publicado."],
+        ["audience", "A quién está dirigido", offering.audience, "El público al que se dirige este taller todavía no se ha publicado."],
         ["objectives", "Objetivos", offering.objectives, "Los objetivos de este taller todavía no se han publicado."],
         ["reading", "Lecturas recomendadas", offering.requiredReading, "Las lecturas recomendadas todavía no se han publicado."],
       ]) {
@@ -272,6 +295,7 @@ function renderCatalog(catalog) {
 }
 
 document.querySelectorAll("[data-preview-form]").forEach((form) => {
+  initPhoneInput(form);
   const requiredFields = [...form.querySelectorAll("[required]")];
   const status = form.querySelector(".form-status");
   let newsletterSubmitted = false;
@@ -280,10 +304,13 @@ document.querySelectorAll("[data-preview-form]").forEach((form) => {
     if (field.type === "checkbox" && !field.checked) message = CLOUD_MODE ? "Confirma tu consentimiento para enviar la solicitud." : "Confirma que entiendes que es una demostración.";
     else if (field.type !== "checkbox" && !field.value.trim()) message = field.tagName === "SELECT" ? "Elige un taller o solicita orientación." : "Completa este campo.";
     else if (field.type === "email" && !field.validity.valid) message = "Escribe un correo válido, por ejemplo: prueba@ejemplo.com.";
+    if (!message && field.name === "phone") {
+      try { validatePhone({ phone: field.value, phoneCountry: form.elements.phoneCountry.value }); } catch (error) { message = error.message; }
+    }
     if (!message && CLOUD_MODE && field.type === "email" && form.classList.contains("newsletter-form")) {
       try { validateNewsletterEmail(field.value); } catch (error) { message = error.message; }
     }
-    const error = document.getElementById(field.getAttribute("aria-describedby"));
+    const error = (field.getAttribute("aria-describedby") || "").split(/\s+/u).map((id) => document.getElementById(id)).find((node) => node?.classList.contains("field-error"));
     if (error) error.textContent = message;
     field.setAttribute("aria-invalid", String(Boolean(message)));
     return !message;
@@ -326,7 +353,7 @@ document.querySelectorAll("[data-preview-form]").forEach((form) => {
     status.textContent = "";
     if (event.target instanceof Element && event.target.getAttribute("aria-invalid") === "true") validateField(event.target);
   });
-  form.querySelectorAll("[data-preview-fields]").forEach((fieldset) => { fieldset.disabled = false; });
+  form.querySelectorAll("[data-preview-fields]").forEach((fieldset) => { fieldset.disabled = Boolean(form.elements.course); });
   if (CLOUD_MODE) {
     form.querySelector(".checkbox-label span").textContent = form.classList.contains("newsletter-form") ? "Quiero recibir el boletín y autorizo guardar mi dirección. Solo recibiré campañas después de confirmar mi correo y podré darme de baja." : "Autorizo el almacenamiento privado de estos datos para gestionar mi solicitud.";
     form.querySelector('[type="submit"]').textContent = form.classList.contains("newsletter-form") ? "Solicitar suscripción" : "Enviar solicitud";
@@ -350,13 +377,15 @@ document.querySelectorAll("[data-preview-form]").forEach((form) => {
 
 const calendar = createCalendar();
 const admin = canAdminister ? createAdmin(refreshWorkshops) : null;
-await initFeaturedView(contentStorage, refreshShowcase, CLOUD_MODE, async (path, options) => (await apiRequest(`editorial${path}`, options)).value);
-if (canAdminister) await createFeaturedAdmin();
-if (canAdminister) await createSettingsAdmin();
+const viewsReady = [
+  contactsReady,
+  initFeaturedView(contentStorage, refreshShowcase, CLOUD_MODE, async (path, options) => (await apiRequest(`editorial${path}`, options)).value),
+  ...(canAdminister ? [createFeaturedAdmin(), createSettingsAdmin(), createEnrollmentAdmin()] : []),
+];
 
 const adminTabs = document.querySelector('[role="tablist"]');
 if (adminTabs && canAdminister) {
-  for (const [id, label, panel, hash] of [["settings", "Contactos", "settings-panel", "contactos"], ["mail", "Boletín", "mail-panel", "boletin"]]) {
+  for (const [id, label, panel, hash] of [["enrollments", "Inscripciones", "enrollments-panel", "inscripciones"], ["settings", "Contactos", "settings-panel", "contactos"], ["mail", "Boletín", "mail-panel", "boletin"]]) {
     const button = element("button", label); button.id = `tab-${id}`; button.type = "button";
     button.setAttribute("role", "tab"); button.setAttribute("aria-controls", panel); button.setAttribute("aria-selected", "false"); button.tabIndex = -1; button.dataset.tabHash = hash; adminTabs.append(button);
   }
@@ -394,8 +423,14 @@ if (adminTabs && canAdminister) {
   document.querySelectorAll('[role="tabpanel"]').forEach((panel) => { panel.hidden = true; });
 }
 
+let catalogLoaded = false;
 async function refreshWorkshops() {
   const alert = document.querySelector("#data-error");
+  const finish = [
+    beginLoading(document.querySelector("#calendar-grid"), { label: "Cargando calendario", shape: "calendar", show: !catalogLoaded }),
+    beginLoading(document.querySelector("[data-schedule-list]"), { label: "Cargando fechas", show: !catalogLoaded }),
+    ...[...document.querySelectorAll("[data-offering-list], #admin-workshops")].map((target) => beginLoading(target, { label: "Cargando catálogo guardado", count: 2, show: !catalogLoaded })),
+  ];
   try {
     await refreshCatalog();
     const catalog = loadCatalog(contentStorage);
@@ -405,17 +440,22 @@ async function refreshWorkshops() {
     renderCatalog(catalog);
     calendar?.update(workshops);
     admin?.update(catalog);
+    const signup = document.querySelector("#signup-course");
+    if (signup) signup.closest("[data-preview-fields]").disabled = false;
+    catalogLoaded = true;
   } catch (error) {
     alert.textContent = `No se pudo cargar el catálogo. ${error.message} No se han sustituido tus datos. ${CLOUD_MODE ? "Revisa la conexión y vuelve a intentarlo." : "Revisa el almacenamiento del navegador o importa una copia válida desde Administración local."}`;
     alert.hidden = false;
     document.querySelectorAll("[data-workshop-cards], [data-service-cards], [data-offering-detail], [data-pricing-rows]").forEach((container) => container.replaceChildren());
     const select = document.querySelector("#signup-course");
     if (select) select.replaceChildren(new Option("Catálogo no disponible", ""));
-    calendar?.update([]);
+    calendar?.unavailable();
     admin?.lock();
+  } finally {
+    initialCatalogLoading.forEach((done) => done());
+    finish.forEach((done) => done());
   }
 }
-
 if (document.querySelector("[data-workshop-cards], [data-service-cards], [data-offering-detail], [data-pricing-rows], #signup-course, #calendar-grid, #workshop-form")) {
   await refreshWorkshops();
   window.addEventListener("content-changed", refreshWorkshops);
@@ -456,3 +496,4 @@ document.querySelectorAll("[data-export-submissions]").forEach((button) => {
     }
   });
 });
+await Promise.all(viewsReady);

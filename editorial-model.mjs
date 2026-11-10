@@ -19,10 +19,6 @@ export const COAUTHORED_SAMPLE = {
 <p>Al cerrar los cuadernos, ninguna de las dos voces había desaparecido. Habíamos encontrado una tercera: la de una conversación que seguía abierta.</p>`,
 };
 
-export function isExamplePost(id) {
-  return id === "ejemplo" || id === COAUTHORED_SAMPLE.id;
-}
-
 export function tagKey(value) {
   return value.trim().replace(/\s+/gu, " ").normalize("NFC").toLocaleLowerCase("es");
 }

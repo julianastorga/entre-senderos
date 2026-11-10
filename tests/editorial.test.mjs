@@ -1,8 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { authorCredit, externalLink, editorialPage, postMetadata, publicationMetadata, publicationDate } from "../editorial-model.mjs";
+import { validateFeaturedText } from "../featured-text.mjs";
 
 const entries = Array.from({ length: 19 }, (_, index) => ({ id: `entry-${String(index).padStart(2, "0")}`, kind: index % 2 ? "post" : "participant", publishedAt: `2026-03-${String(index + 1).padStart(2, "0")}T04:30:00.000Z` }));
+
+test("clearing a sample marker remains explicit through client validation and JSON submission", () => {
+  const text = { version: 1, id: "ejemplo", title: "Texto actualizado", html: "<p>Una publicación propia.</p>", permissionConfirmed: true, sample: false };
+  const validated = validateFeaturedText(text, { sanitize: (html) => html, countWords: () => 3 });
+  assert.equal(JSON.parse(JSON.stringify(validated)).sample, false);
+});
 
 test("the blog features the latest post and paginates all previous legacy kinds without duplicates", () => {
   const first = editorialPage(entries);

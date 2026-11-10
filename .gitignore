@@ -8,3 +8,6 @@ api/http/index.cjs.LEGAL.txt
 local.settings.json
 *.publishsettings
 infra/*.json
+/local-only/
+/enrollment*.json
+/newsletter*.json

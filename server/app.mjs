@@ -1,6 +1,7 @@
 import sanitizeHtml from "sanitize-html";
 import { flattenInstances, validateCatalogV2 } from "../catalog-model.mjs";
 import { readCatalog } from "./catalog-store.mjs";
+import { readShowcase } from "./showcase-store.mjs";
 import { MAX_TEXT_SIZE, validateShowcase } from "../featured-text.mjs";
 import { validateNewsletterEmail } from "../email-validation.mjs";
 import { verifyMailDomain } from "./mail-domain.mjs";
@@ -10,8 +11,10 @@ import { validateContacts, DEFAULT_CONTACTS } from "../contact-model.mjs";
 import { MailError, MAIL_OAUTH_COOKIE } from "./mail-service.mjs";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { decodeHTML } from "entities";
-import { editorialPage, externalLink, isExamplePost, postMetadata } from "../editorial-model.mjs";
+import { editorialPage, externalLink, postMetadata } from "../editorial-model.mjs";
 import { REACTIONS, emptyReactions, reactionSummary, setReaction } from "../reaction-model.mjs";
+import { validatePhone } from "../phone-model.mjs";
+import { enrollmentStatus, validEnrollmentId, validateEnrollmentStatus } from "../enrollment-model.mjs";
 
 const newsletterCookie = "__Secure-entre_senderos_newsletter";
 const reactionsCookie = "__Host-entre_senderos_reactions";
@@ -218,8 +221,8 @@ export function createApi({
           if (!req.body || JSON.stringify(req.body).length > 500 || !REACTIONS.some(({ id }) => id === req.body.reaction) || typeof req.body.active !== "boolean") throw new HttpError(400, "Elige una reacción válida e indica si deseas activarla.");
           await store.rateLimit("reactions", headers["x-forwarded-for"] || "unknown", { limit: 60, interval: 60_000 });
         }
-        const collection = await store.read("showcase", { version: 1, texts: [] });
-        if (!collection.value.texts.some((text) => text.id === id) && !(isExamplePost(id) && !collection.value.texts.length)) throw new HttpError(404, "Esta publicación ya no está disponible.");
+        const collection = await readShowcase(store);
+        if (!collection.value.texts.some((text) => text.id === id)) throw new HttpError(404, "Esta publicación ya no está disponible.");
         const cookie = (headers.cookie || "").split(";").map((part) => part.trim()).find((part) => part.startsWith(`${reactionsCookie}=`))?.slice(reactionsCookie.length + 1);
         const token = /^[a-f0-9]{64}$/u.test(cookie || "") ? cookie : randomBytes(32).toString("hex");
         const visitor = createHash("sha256").update(token).digest("hex");
@@ -243,10 +246,9 @@ export function createApi({
         }
       }
       if (method === "GET" && ["editorial", "editorial/entry"].includes(path)) {
-        const collection = await store.read("showcase", { version: 1, texts: [] });
+        const collection = await readShowcase(store);
         const texts = validateShowcase(collection.value, { sanitize: sanitizeStory, countWords: countStoryWords, allowDataImages: false });
         if (path === "editorial/entry") {
-          if (!texts.length && (!req.query?.id || isExamplePost(req.query.id))) return response(200, { example: true });
           const text = req.query?.id ? texts.find((item) => item.id === req.query.id) : editorialPage(texts).featured;
           if (!text) throw new HttpError(404, "Esta publicación ya no está disponible.");
           return response(200, { text });
@@ -258,7 +260,7 @@ export function createApi({
           const minutes = Math.max(1, Math.ceil(count / 200));
           return { ...text, excerpt: words.slice(0, 40).join(" ") + (words.length > 40 ? "…" : ""), meta: `${count.toLocaleString("es-419")} palabras · ${minutes} ${minutes === 1 ? "minuto" : "minutos"} de lectura` };
         }
-        return response(200, { ...page, example: !texts.length, featured: page.featured ? summarize(page.featured) : null, items: page.items.map(summarize) });
+        return response(200, { ...page, featured: page.featured ? summarize(page.featured) : null, items: page.items.map(summarize) });
       }
       if (path === "settings/contacts") {
         if (method === "GET") {
@@ -304,7 +306,7 @@ export function createApi({
       }
       if (["catalog", "workshops", "showcase"].includes(path)) {
         if (method === "GET") {
-          const result = path === "showcase" ? await store.read(path, { version: 1, texts: [] }) : await readCatalog(store);
+          const result = path === "showcase" ? await readShowcase(store) : await readCatalog(store);
           return response(200, path === "workshops" ? { version: 1, workshops: flattenInstances(result.value) } : result.value, result.version);
         }
         if (method !== "PUT") throw new HttpError(405, "Método no admitido.");
@@ -327,7 +329,7 @@ export function createApi({
           value.programs = value.programs.map((program) => {
             const previous = programs.find((item) => item.id === program.id);
             const input = req.body.programs.find((item) => item.id === program.id);
-            for (const field of ["objectives", "requiredReading", "modality"]) {
+            for (const field of ["overview", "audience", "objectives", "requiredReading", "modality"]) {
               if (input[field] === undefined && previous) program[field] = previous[field];
             }
             return program;
@@ -344,11 +346,29 @@ export function createApi({
             for (const field of ["subtitle", "tags"]) {
               if (input[field] === undefined && previousMetadata) text[field] = previousMetadata[field];
             }
-            return { ...text, authorUrl: input.authorUrl === undefined ? previousUrl || text.authorUrl : text.authorUrl, publishedAt: previous?.publishedAt || new Date().toISOString() };
+            return { ...text, ...(input.sample === undefined && previous?.sample ? { sample: true } : {}), authorUrl: input.authorUrl === undefined ? previousUrl || text.authorUrl : text.authorUrl, publishedAt: previous?.publishedAt || new Date().toISOString() };
           });
         }
         const result = await store.write(path, value, headers["if-match"]);
         return response(200, result.value, result.version);
+      }
+      if (path === "enrollments") {
+        requireAdmin();
+        if (method === "GET") {
+          const page = await store.jsonPage("submissions/enrollment/", req.query?.continuationToken);
+          return response(200, { ...page, items: page.items.filter((item) => item.value).map((item) => ({ ...item, value: { ...item.value, status: enrollmentStatus(item.value) } })) });
+        }
+        if (method !== "PUT") throw new HttpError(405, "Método no admitido.");
+        requireJson();
+        if (!headers["if-match"]) throw new HttpError(428, "Actualiza las inscripciones antes de guardar.");
+        if (!validEnrollmentId(req.query?.id) || !req.body || JSON.stringify(req.body).length > 500) throw new HttpError(400, "Elige una inscripción y un estado válidos.");
+        let status;
+        try { status = validateEnrollmentStatus(req.body.status); } catch (error) { throw new HttpError(400, error.message); }
+        const name = `submissions/enrollment/${req.query.id}`;
+        const current = await store.read(name, null);
+        if (!current.value) throw new HttpError(404, "Esta inscripción ya no está disponible.");
+        const saved = await store.write(name, { ...current.value, status, updatedAt: new Date().toISOString() }, headers["if-match"]);
+        return response(200, saved.value, saved.version);
       }
       if (path === "submissions" && method === "GET") {
         requireAdmin();
@@ -382,13 +402,15 @@ export function createApi({
           const name = typeof body.name === "string" ? body.name.trim() : "";
           const message = typeof body.message === "string" ? body.message.trim() : "";
           if (!name || name.length > 100 || message.length > 2000) throw new HttpError(400, "Revisa el nombre y el mensaje de la solicitud.");
+          let phone;
+          try { phone = validatePhone(body); } catch (error) { throw new HttpError(400, error.message); }
           const { value: catalog } = await readCatalog(store);
           const instance = flattenInstances(catalog).find((workshop) => workshop.id === body.course);
           const service = typeof body.course === "string" && body.course.startsWith("servicio:") ? catalog.services.find((item) => item.id === body.course.slice(9)) : null;
           if (body.course !== "orientacion" && !instance && !service) throw new HttpError(400, "La edición o el servicio seleccionado ya no está disponible.");
           if (instance) Object.assign(value, { programId: instance.programId, workshopName: instance.name, editionCode: instance.code, startDate: instance.startDate });
           if (service) Object.assign(value, { serviceId: service.id, serviceName: service.name });
-          Object.assign(value, { name, course: body.course, message });
+          Object.assign(value, { name, course: body.course, message, ...phone, status: "interested" });
         }
         try {
           await store.rateLimit(path, headers["x-forwarded-for"] || email);
