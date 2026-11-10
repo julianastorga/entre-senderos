@@ -7,6 +7,8 @@ import { contentStorage, refreshShowcase, persistShowcase, storageLocation } fro
 import { createCoverUpload, uploadImage } from "./image-upload.mjs";
 import { imageElement, MAX_STORY_IMAGES } from "./image-model.mjs";
 import { externalLink, publicationDate } from "./editorial-model.mjs";
+import { DEFAULT_POSTS } from "./sample-posts.mjs";
+import { beginLoading } from "./loading.mjs";
 
 export async function createFeaturedAdmin() {
   const form = document.querySelector("#featured-text-form");
@@ -19,6 +21,7 @@ export async function createFeaturedAdmin() {
   const author = document.querySelector("#text-author");
   const authorUrl = document.querySelector("#text-author-url");
   const permission = document.querySelector("#text-permission");
+  const sample = document.querySelector("#text-sample");
   const counter = document.querySelector("#text-word-count");
   const status = document.querySelector("#text-admin-status");
   const upload = document.querySelector("#text-upload");
@@ -41,6 +44,7 @@ export async function createFeaturedAdmin() {
   let original = null;
   let dirty = false;
   let editorRevision = 0;
+  let loaded = false;
   const panel = form.closest('[role="tabpanel"]');
   const cover = createCoverUpload(form, "text", status, () => { permission.checked = false; markChanged(); });
 
@@ -86,6 +90,7 @@ export async function createFeaturedAdmin() {
     linkText.value = "";
     linkRange = null;
     permission.checked = Boolean(text?.permissionConfirmed);
+    sample.checked = Boolean(text?.sample);
     editor.replaceChildren(textFragment(text?.html || ""));
     editor.contentEditable = "true";
     fields.disabled = false;
@@ -102,14 +107,14 @@ export async function createFeaturedAdmin() {
     if (!texts.length) {
       const empty = document.createElement("p");
       empty.className = "empty-state";
-      empty.textContent = "Todavía no hay textos guardados. El blog muestra las publicaciones de ejemplo.";
+      empty.textContent = "Todavía no hay publicaciones guardadas. Crea una nueva; el blog permanecerá vacío hasta que publiques.";
       list.append(empty);
     }
     texts.forEach((text) => {
       const card = document.createElement("article");
       card.className = "saved-text";
       if (text.coverImage) card.append(imageElement(text.coverImage, "story-cover"));
-      const heading = document.createElement("h3");
+      const heading = document.createElement("h4");
       heading.textContent = text.title;
       const credit = document.createElement("p");
       credit.textContent = `${text.author ? `Por ${text.author} · ` : ""}${publicationDate(text.publishedAt)} · ${wordCount(text.html).toLocaleString("es-419")} palabras`;
@@ -160,6 +165,7 @@ export async function createFeaturedAdmin() {
   }
   async function loadState() {
     const revision = editorRevision;
+    const finish = beginLoading(list, { label: "Cargando publicaciones guardadas", count: 2, show: !loaded });
     try {
       await refreshShowcase();
       if (dirty || revision !== editorRevision) return;
@@ -167,13 +173,16 @@ export async function createFeaturedAdmin() {
       const active = texts.find((text) => text.id === editingId);
       fillEditor(active);
       renderList(texts);
+      loaded = true;
       status.textContent = `Los textos se guardan ${storageLocation}. Crea uno nuevo o elige un relato para editarlo.`;
     } catch (error) {
-      editor.contentEditable = "false";
-      fields.disabled = true;
-      list.replaceChildren();
-      status.textContent = `No se pudo cargar el blog. ${error.message} No se sobrescribió ningún dato. Puedes restablecer el ejemplo para recuperar este espacio.`;
-    }
+      if (!loaded && !dirty && revision === editorRevision) {
+        editor.contentEditable = "false";
+        fields.disabled = true;
+        list.replaceChildren();
+      }
+      status.textContent = `No se pudo cargar el blog. ${error.message} No se sobrescribió ningún dato.${dirty ? " Conservamos los cambios del editor." : ""}`;
+    } finally { finish(); }
   }
   function markChanged() {
     editorRevision += 1;
@@ -390,6 +399,7 @@ export async function createFeaturedAdmin() {
         version: 1, id: editingId || crypto.randomUUID(), title: title.value,
         subtitle: subtitle.value, tags: tags.value.split(",").map((tag) => tag.trim()).filter(Boolean),
         author: author.value, authorUrl: authorUrl.value, html: editor.innerHTML, permissionConfirmed: permission.checked,
+        sample: sample.checked,
         coverImage: cover.read(),
         publishedAt: editingId ? latest.find((item) => item.id === editingId).publishedAt || new Date().toISOString() : new Date().toISOString(),
       });
@@ -414,7 +424,7 @@ export async function createFeaturedAdmin() {
     panel.inert = true;
     try {
       await refreshShowcase();
-      await persistShowcase([]);
+      await persistShowcase(DEFAULT_POSTS);
       editingId = null;
       dirty = false;
       await loadState();

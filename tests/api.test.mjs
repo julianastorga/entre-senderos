@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { scryptSync, createHash } from "node:crypto";
+import { scryptSync, createHash, randomUUID } from "node:crypto";
 import { createApi } from "../server/app.mjs";
 import { createDemoAuth } from "../server/demo-auth.mjs";
 import { migrateWorkshops } from "../catalog-model.mjs";
@@ -39,8 +39,18 @@ class MemoryStore {
       throw error;
     }
   }
-  async submit(kind, value) { this.records.push({ kind, value }); }
-  async submissions(kind) { return { items: this.records.filter((record) => record.kind === kind).map((record) => record.value), continuationToken: null }; }
+  async submit(kind, value) {
+    const id = kind === "newsletter" ? createHash("sha256").update(value.email).digest("hex") : `${new Date().toISOString()}-${randomUUID()}`;
+    await this.write(`submissions/${kind}/${id}`, value, "initial");
+    this.records.push({ id, kind, value });
+    return { id, created: true };
+  }
+  async jsonPage(prefix, token) {
+    const items = [...this.data.entries()].filter(([name]) => name.startsWith(prefix)).sort(([a], [b]) => a.localeCompare(b)).map(([name, record]) => ({ id: name.slice(prefix.length), ...structuredClone(record) }));
+    const start = Number(token || 0);
+    return { items: items.slice(start, start + 2), continuationToken: items.length > start + 2 ? String(start + 2) : null };
+  }
+  async submissions(kind) { return { items: [...this.data.entries()].filter(([name]) => name.startsWith(`submissions/${kind}/`)).map(([, record]) => structuredClone(record.value)), continuationToken: null }; }
 }
 
 const github = (login) => Buffer.from(JSON.stringify({ identityProvider: "github", userDetails: login, userRoles: ["authenticated"] })).toString("base64");
@@ -79,7 +89,7 @@ test("the API sanitizes rich stories and validates permission and collection ide
 test("edition and service inquiries retain immutable offering references after administrator deletion", async () => {
   const { api, store } = create();
   const initial = await api(request("catalog"));
-  const body = { email: "lectora@dominio.org", name: "Prueba", consent: true, message: "" };
+  const body = { email: "lectora@dominio.org", name: "Prueba", consent: true, message: "", phone: "+1 202 555 0123", phoneCountry: "US" };
   assert.equal((await api(request("enrollment", "POST", { ...body, course: "niebla" }))).status, 202);
   assert.equal(store.records[0].value.programId, "niebla");
   assert.equal(store.records[0].value.editionCode, "NIE-01");
@@ -98,14 +108,16 @@ test("workshop sections are shared and validated, and older edition editors cann
   const { api } = create();
   const initial = await api(request("catalog"));
   const catalog = structuredClone(initial.body);
-  Object.assign(catalog.programs[0], { objectives: "Practicar escenas.\n\nRevisar un texto.", requiredReading: "Lectura de muestra.", modality: "Taller corto · En línea" });
+  Object.assign(catalog.programs[0], { overview: "Ejercicios y lectura compartida.", audience: "Personas que desean empezar a escribir.", objectives: "Practicar escenas.\n\nRevisar un texto.", requiredReading: "Lectura de muestra.", modality: "Taller corto · En línea" });
   const saved = await api(request("catalog", "PUT", catalog, { ...admin, "if-match": initial.headers.ETag }));
   assert.equal(saved.status, 200);
   const publicCatalog = await api(request("catalog"));
   assert.equal(publicCatalog.body.programs[0].objectives, catalog.programs[0].objectives);
   assert.equal(publicCatalog.body.programs[0].requiredReading, catalog.programs[0].requiredReading);
   assert.equal(publicCatalog.body.programs[0].modality, catalog.programs[0].modality);
-  const oldClient = { ...catalog, programs: catalog.programs.map(({ objectives, requiredReading, modality, ...program }) => program) };
+  assert.equal(publicCatalog.body.programs[0].overview, catalog.programs[0].overview);
+  assert.equal(publicCatalog.body.programs[0].audience, catalog.programs[0].audience);
+  const oldClient = { ...catalog, programs: catalog.programs.map(({ overview, audience, objectives, requiredReading, modality, ...program }) => program) };
   oldClient.instances[0].code = "NIE-UPDATED";
   const retained = await api(request("catalog", "PUT", oldClient, { ...admin, "if-match": saved.headers.ETag }));
   assert.equal(retained.status, 200);
@@ -117,11 +129,15 @@ test("workshop sections are shared and validated, and older edition editors cann
   const clear = structuredClone(retained.body);
   clear.programs[0].objectives = "";
   clear.programs[0].requiredReading = "";
+  clear.programs[0].overview = "";
+  clear.programs[0].audience = "";
   const cleared = await api(request("catalog", "PUT", clear, headers));
   assert.equal(cleared.status, 200);
   assert.equal(cleared.body.programs[0].objectives, "");
   assert.equal(cleared.body.programs[0].requiredReading, "");
   assert.equal(cleared.body.programs[0].modality, catalog.programs[0].modality);
+  assert.equal(cleared.body.programs[0].overview, "");
+  assert.equal(cleared.body.programs[0].audience, "");
 });
 
 test("public blog pages summarize both the latest and archived posts and assign publication dates on the server", async () => {
@@ -238,26 +254,38 @@ test("anonymous reactions persist per browser, toggle independently and use idem
   assert.equal((await change("fire", true, other.headers["Set-Cookie"].split(";")[0])).body.counts.fire, 2);
 });
 
-test("the coauthored sample is readable and reactable only while no real posts are saved", async () => {
+test("initial blog samples are manageable publications and explicit deletion never resurrects them", async () => {
   const { api, store } = create();
   const query = { id: "ejemplo-coautoria" };
-  assert.deepEqual((await api(request("editorial/entry", "GET", null, {}, query))).body, { example: true });
+  const [first, concurrent] = await Promise.all([api(request("showcase")), api(request("showcase"))]);
+  assert.equal(first.headers.ETag, concurrent.headers.ETag);
+  assert.equal(first.body.texts.length, 2);
+  const entry = (await api(request("editorial/entry", "GET", null, {}, query))).body.text;
+  assert.equal(entry.sample, true);
+  assert.equal(entry.authorUrl, "https://example.org/");
   const reactions = await api(request("editorial/reactions", "GET", null, {}, query));
   assert.equal(reactions.status, 200);
   const cookie = reactions.headers["Set-Cookie"].split(";")[0];
   const liked = await api(request("editorial/reactions", "PUT", { reaction: "heart", active: true }, { cookie }, query));
   assert.equal(liked.body.counts.heart, 1);
   assert.equal((await api(request("editorial/reactions", "GET", null, {}, { id: "ejemplo" }))).body.counts.heart, 0);
-  assert.equal(store.data.has("showcase"), false, "showing or reacting to samples must not seed or overwrite the shared collection");
-  const text = { version: 1, id: "real-post", title: "Publicación propia", html: "<p>Una publicación guardada.</p>", permissionConfirmed: true };
-  for (const id of ["ejemplo", query.id]) {
-    assert.equal((await api(request("showcase", "PUT", { version: 1, texts: [{ ...text, id }] }, admin))).status, 400);
-  }
-  assert.equal((await api(request("showcase", "PUT", { version: 1, texts: [text] }, admin))).status, 200);
+  assert.equal(store.data.get("showcase").version, first.headers.ETag, "reacting must not rewrite managed publications");
+  const edited = await api(request("showcase", "PUT", { version: 1, texts: first.body.texts.map((text) => text.id === entry.id ? { ...text, title: "Coautoría editada", sample: false } : text) }, { ...admin, "if-match": first.headers.ETag }));
+  assert.equal(edited.status, 200);
+  const changed = edited.body.texts.find((text) => text.id === entry.id);
+  assert.equal(changed.title, "Coautoría editada");
+  assert.equal(changed.sample, false);
+  assert.equal(changed.authorUrl, entry.authorUrl);
+  assert.equal(changed.publishedAt, entry.publishedAt);
+  assert.equal((await api(request("editorial/reactions", "GET", null, { cookie }, query))).body.counts.heart, 1);
+  const removed = await api(request("showcase", "PUT", { version: 1, texts: [] }, { ...admin, "if-match": edited.headers.ETag }));
+  assert.equal(removed.status, 200);
+  assert.deepEqual((await api(request("showcase"))).body.texts, []);
+  assert.equal((await api(request("editorial"))).body.featured, null);
   assert.equal((await api(request("editorial/entry", "GET", null, {}, query))).status, 404);
   assert.equal((await api(request("editorial/reactions", "GET", null, {}, query))).status, 404);
   assert.equal((await api(request("editorial/reactions", "PUT", { reaction: "heart", active: true }, { cookie }, query))).status, 404);
-  assert.equal((await api(request("editorial"))).body.featured.id, text.id);
+  assert.equal((await api(request("showcase", "PUT", { version: 1, texts: first.body.texts }, { ...admin, "if-match": first.headers.ETag }))).status, 409);
 });
 
 test("concurrent reactions merge without lost counts or overwriting blog content", async () => {
@@ -275,7 +303,7 @@ test("concurrent reactions merge without lost counts or overwriting blog content
   assert.equal(state.body.counts.heart, 2);
   assert.equal(state.body.counts.applause, 1);
   assert.deepEqual(state.body.selected.sort(), ["applause", "heart"]);
-  assert.equal(store.data.has("showcase"), false);
+  assert.equal(store.data.get("showcase").value.texts.length, 2);
   store.write = async () => { const error = new Error("Conflict"); error.statusCode = 412; throw error; };
   const conflict = await api(request("editorial/reactions", "PUT", { reaction: "heart", active: false }, { cookie: first }, query));
   assert.equal(conflict.status, 409);
@@ -295,10 +323,10 @@ test("reaction writes reject invalid input, cross-site requests, unavailable pos
   assert.equal((await api(request("editorial/reactions", "GET", null, {}, { id: "deleted" }))).status, 404);
   store.limited = true;
   assert.equal((await api(request("editorial/reactions", "PUT", { reaction: "heart", active: true }, {}, query))).status, 429);
-  assert.equal(store.data.size, 0);
+  assert.equal(store.data.has("reactions/ejemplo"), false);
   store.limited = false;
   const text = { version: 1, id: "published", title: "Una publicación", html: "<p>Una lectura.</p>", permissionConfirmed: true };
-  const saved = await api(request("showcase", "PUT", { version: 1, texts: [text] }, admin));
+  const saved = await api(request("showcase", "PUT", { version: 1, texts: [text] }, { ...admin, "if-match": (await api(request("showcase"))).headers.ETag }));
   assert.equal(saved.status, 200);
   assert.equal((await api(request("editorial/reactions", "GET", null, {}, query))).status, 404, "the demo is not a real post when the blog has publications");
   assert.equal((await api(request("editorial/reactions", "GET", null, {}, { id: text.id }))).status, 200);
@@ -331,7 +359,7 @@ test("managed images require authenticated uploads, bounded valid bytes and acce
 
 test("enrollment and newsletter requests require consent, valid inputs and rate limits; exported records remain private", async () => {
   const { api, store } = create();
-  const body = { email: "lectora@dominio.org", name: "Prueba", course: "niebla", consent: true, message: "Solicitud ficticia" };
+  const body = { email: "lectora@dominio.org", name: "Prueba", course: "niebla", consent: true, message: "Solicitud ficticia", phone: "+1 202 555 0123", phoneCountry: "US" };
   assert.equal((await api(request("enrollment", "POST", { ...body, consent: false }))).status, 400);
   assert.equal((await api(request("enrollment", "POST", { ...body, email: "invalid" }))).status, 400);
   assert.equal((await api(request("enrollment", "POST", { ...body, course: "deleted" }))).status, 400);
@@ -343,6 +371,77 @@ test("enrollment and newsletter requests require consent, valid inputs and rate 
   store.limited = true;
   assert.equal((await api(request("newsletter", "POST", body))).status, 429);
   assert.equal(store.records.length, 2);
+});
+
+test("enrollment requires a matching international phone and contacts remain admin-only", async () => {
+  const { api, store } = create();
+  const body = { email: "private-enrollment@example.org", name: "Solicitud privada de prueba", course: "orientacion", consent: true, phone: "(202) 555-0123", phoneCountry: "US", status: "completed" };
+  for (const invalid of [{ phone: "" }, { phone: "123" }, { phoneCountry: "ZZ" }, { phone: "+12025550123", phoneCountry: "CR" }]) {
+    assert.equal((await api(request("enrollment", "POST", { ...body, ...invalid }))).status, 400);
+  }
+  assert.equal(store.records.length, 0);
+  assert.equal((await api(request("enrollment", "POST", body))).status, 202);
+  assert.equal(store.records[0].value.phone, "+12025550123");
+  assert.equal(store.records[0].value.phoneCountry, "US");
+  assert.equal(store.records[0].value.status, "interested", "public callers cannot confirm their own attendance");
+  assert.equal((await api(request("enrollments"))).status, 401);
+  assert.equal((await api(request("enrollments", "GET", null, { "x-ms-client-principal": github("another-user") }))).status, 403);
+  const authorized = await api(request("enrollments", "GET", null, admin));
+  assert.equal(authorized.status, 200);
+  assert.equal(authorized.headers["Cache-Control"], "no-store");
+  assert.equal(authorized.body.items[0].value.email, body.email);
+  assert.equal(authorized.body.items[0].value.phone, "+12025550123");
+  for (const path of ["catalog", "editorial", "settings/contacts"]) {
+    const publicResponse = JSON.stringify((await api(request(path))).body);
+    for (const contact of [body.email, body.name, "+12025550123"]) assert.ok(!publicResponse.includes(contact));
+  }
+});
+
+test("private enrollment pages preserve legacy records and lifecycle updates use protected conditional writes", async () => {
+  const { api, store } = create();
+  const body = { email: "enrollment@example.org", name: "Prueba", course: "niebla", consent: true, phone: "+12025550123", phoneCountry: "US", message: "Mensaje conservado" };
+  await api(request("enrollment", "POST", body));
+  await api(request("enrollment", "POST", { ...body, email: "second-enrollment@example.org" }));
+  const legacyId = `2025-01-01T10:00:00.000Z-${randomUUID()}`;
+  const legacy = { name: "Solicitud anterior", email: "legacy-enrollment@example.org", course: "deleted-edition", workshopName: "Taller anterior", editionCode: "OLD-01", createdAt: "2025-01-01T10:00:00.000Z", message: "No perder esta solicitud", consent: true };
+  await store.write(`submissions/enrollment/${legacyId}`, legacy, "initial");
+  const first = await api(request("enrollments", "GET", null, admin));
+  assert.equal(first.body.items.length, 2);
+  assert.ok(first.body.continuationToken);
+  const second = await api(request("enrollments", "GET", null, admin, { continuationToken: first.body.continuationToken }));
+  assert.equal(second.body.items.length, 1);
+  assert.equal(second.body.continuationToken, null);
+  const items = [...first.body.items, ...second.body.items];
+  assert.equal(new Set(items.map((item) => item.id)).size, 3);
+  const record = items.find((item) => item.id === legacyId);
+  assert.equal(record.value.phone, undefined);
+  assert.equal(record.value.status, "interested");
+  const query = { id: record.id };
+  const update = (status, headers = admin, extra = {}) => api(request("enrollments", "PUT", { status, ...extra }, headers, query));
+  assert.equal((await update("confirmed", {})).status, 401);
+  assert.equal((await update("confirmed", { ...admin, "x-ms-client-principal": github("another-user") })).status, 403);
+  assert.equal((await update("confirmed", { "x-ms-client-principal": admin["x-ms-client-principal"] })).status, 428);
+  const initialHeaders = { ...admin, "if-match": record.version };
+  assert.equal((await update("confirmed", { ...initialHeaders, "sec-fetch-site": "cross-site" })).status, 403);
+  assert.equal((await update("confirmed", { ...initialHeaders, "content-type": "text/plain" })).status, 415);
+  for (const status of ["unknown", null, 42]) assert.equal((await update(status, initialHeaders)).status, 400);
+  assert.equal((await api(request("enrollments", "PUT", { status: "confirmed" }, initialHeaders, { id: "../mail-settings" }))).status, 400);
+  assert.equal((await api(request("enrollments", "PUT", { status: "confirmed" }, initialHeaders, { id: `2025-01-01T10:00:00.000Z-${randomUUID()}` }))).status, 404);
+  let version = record.version;
+  for (const status of ["confirmed", "attending", "withdrawn", "completed", "interested"]) {
+    const saved = await update(status, { ...admin, "if-match": version }, { email: "must-not-replace@example.org", workshopName: "Must not replace snapshot" });
+    assert.equal(saved.status, 200);
+    assert.equal(saved.headers["Cache-Control"], "no-store");
+    const { status: savedStatus, updatedAt, ...snapshot } = saved.body;
+    assert.equal(savedStatus, status);
+    assert.ok(Number.isFinite(Date.parse(updatedAt)));
+    assert.deepEqual(snapshot, legacy);
+    version = saved.headers.ETag;
+  }
+  assert.equal((await update("confirmed", initialHeaders)).status, 409);
+  assert.equal(store.data.get(`submissions/enrollment/${legacyId}`).value.status, "interested");
+  const exported = await api(request("submissions", "GET", null, admin, { kind: "enrollment" }));
+  assert.equal(exported.body.items.find((item) => item.email === legacy.email).status, "interested");
 });
 
 test("production administration requires configured Entra tenant and exact domain, never demo or GitHub credentials", async () => {

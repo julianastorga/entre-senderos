@@ -4,9 +4,11 @@ import { MAX_STORY_HTML_SIZE, MAX_STORY_IMAGES, isImageSource, validateImage } f
 export const SHOWCASE_KEY = "writing-showcase:v1";
 export const LEGACY_TEXT_KEY = "writing-featured-text:v1";
 export const MAX_TEXT_SIZE = 250_000;
-import { authorCredit, COAUTHORED_SAMPLE, externalLink, editorialPage, isExamplePost, postMetadata, publicationMetadata, publicationDate, tagKey } from "./editorial-model.mjs";
+import { authorCredit, externalLink, editorialPage, postMetadata, publicationMetadata, publicationDate, tagKey } from "./editorial-model.mjs";
 import { initReactions } from "./reactions.mjs";
 import { REACTIONS_KEY } from "./reaction-model.mjs";
+import { DEFAULT_POSTS } from "./sample-posts.mjs";
+import { beginLoading } from "./loading.mjs";
 
 const allowedTags = new Set(["P", "BR", "STRONG", "EM", "U", "BLOCKQUOTE", "H2", "H3", "UL", "OL", "LI", "A"]);
 const blockedTags = new Set(["SCRIPT", "STYLE", "IFRAME", "OBJECT", "EMBED", "SVG", "MATH", "FORM", "INPUT", "TEXTAREA", "SELECT", "BUTTON", "LINK", "META", "TEMPLATE", "CANVAS", "AUDIO", "VIDEO", "SOURCE", "HEAD", "TITLE", "BASE"]);
@@ -89,14 +91,15 @@ export function readingMeta(html) {
 export function validateFeaturedText(input, { sanitize = sanitizeTextHtml, countWords = wordCount, allowDataImages = !CLOUD_MODE } = {}) {
   if (!input || input.version !== 1) throw new Error("El texto guardado no tiene un formato válido.");
   const title = typeof input.title === "string" ? input.title.trim() : "";
-  if (typeof input.id !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/u.test(input.id) || isExamplePost(input.id)) throw new Error("El identificador del texto no es válido.");
+  if (typeof input.id !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/u.test(input.id)) throw new Error("El identificador del texto no es válido.");
   if (title.length < 2 || title.length > 150) throw new Error("Escribe un título de entre 2 y 150 caracteres.");
   const credit = authorCredit(input);
   const html = sanitize(input.html);
   if (!countWords(html)) throw new Error("El relato no puede estar vacío.");
   if (input.permissionConfirmed !== true) throw new Error("Confirma que tienes autorización para publicar el texto y su crédito.");
+  if (input.sample !== undefined && typeof input.sample !== "boolean") throw new Error("Indica si la publicación es una muestra ficticia.");
   const coverImage = input.coverImage == null ? null : validateImage(input.coverImage, { allowDataImages });
-  return { version: 1, id: input.id, title, ...credit, ...postMetadata(input), html, permissionConfirmed: true, ...publicationMetadata(input), ...(coverImage ? { coverImage } : {}) };
+  return { version: 1, id: input.id, title, ...credit, ...postMetadata(input), html, permissionConfirmed: true, ...publicationMetadata(input), ...(input.sample !== undefined ? { sample: input.sample } : {}), ...(coverImage ? { coverImage } : {}) };
 }
 
 export function validateShowcase(input, options) {
@@ -110,7 +113,7 @@ export function loadShowcase(storage) {
   const value = storage.getItem(SHOWCASE_KEY);
   if (value !== null) return validateShowcase(JSON.parse(value));
   const legacy = storage.getItem(LEGACY_TEXT_KEY);
-  return legacy === null ? [] : [validateFeaturedText({ ...JSON.parse(legacy), id: "texto-anterior" })];
+  return legacy === null ? validateShowcase({ version: 1, texts: DEFAULT_POSTS }) : [validateFeaturedText({ ...JSON.parse(legacy), id: "texto-anterior" })];
 }
 
 export function saveShowcase(storage, texts) {
@@ -136,18 +139,13 @@ export async function initFeaturedView(storage = window.localStorage, reload = a
   const filterStatus = document.querySelector("[data-blog-filter]");
   let localEntries = [];
   let requestRevision = 0;
+  let loaded = false;
   function urlFor(page, tag = "", toArchive = false) {
     const url = new URL(location.href);
     url.searchParams.delete("tipo");
     if (page === 1) url.searchParams.delete("pagina"); else url.searchParams.set("pagina", String(page));
     if (tag) url.searchParams.set("etiqueta", tag); else url.searchParams.delete("etiqueta");
     return url.pathname + url.search + (toArchive ? "#publicaciones-anteriores" : "");
-  }
-  function exampleCard() {
-    return { id: "ejemplo", publishedAt: null, title: initial.querySelector("[data-featured-title]").textContent, subtitle: initial.querySelector("[data-featured-subtitle]").textContent, tags: ["Relato breve"], author: "Texto de demostración · Autoría de muestra", excerpt: initial.querySelector("[data-featured-excerpt]").textContent, meta: initial.querySelector("[data-featured-meta]").textContent };
-  }
-  function examplePosts() {
-    return [exampleCard(), COAUTHORED_SAMPLE];
   }
   function fillTags(container, tags = []) {
     const nav = container.querySelector("[data-post-tags]");
@@ -247,16 +245,23 @@ export async function initFeaturedView(storage = window.localStorage, reload = a
     return card;
   }
 
-  async function renderBlog() {
+  async function renderBlog(show = !loaded) {
     const revision = ++requestRevision;
     const params = new URLSearchParams(location.search);
     const query = { page: params.get("pagina") || "1", tag: params.get("etiqueta") || "" };
+    const finish = [
+      beginLoading(content, { label: "Cargando publicaciones", shape: "article", count: 1, show }),
+      beginLoading(sidebar, { label: "Cargando etiquetas", shape: "tags", count: 4, show }),
+      beginLoading(archiveSection, { label: "Cargando publicaciones anteriores", show }),
+    ];
     let data;
-    if (cloud) {
-      try { data = await getEditorial(`?pagina=${encodeURIComponent(query.page)}&etiqueta=${encodeURIComponent(query.tag)}`); }
-      catch (error) { if (revision !== requestRevision) return; throw error; }
-      if (data.example) data = editorialPage(examplePosts(), query);
-    } else data = editorialPage(localEntries.length ? localEntries : examplePosts(), query);
+    try {
+      if (cloud) data = await getEditorial(`?pagina=${encodeURIComponent(query.page)}&etiqueta=${encodeURIComponent(query.tag)}`);
+      else data = editorialPage(localEntries, query);
+    } catch (error) {
+      if (revision !== requestRevision) return;
+      throw error;
+    } finally { finish.forEach((done) => done()); }
     if (revision !== requestRevision) return;
     const canonical = urlFor(data.page, data.tag);
     if (location.pathname + location.search !== canonical) history.replaceState(null, "", canonical + location.hash);
@@ -264,14 +269,14 @@ export async function initFeaturedView(storage = window.localStorage, reload = a
     content.replaceChildren();
     if (data.featured) content.append(renderCard(data.featured, true));
     else {
-      const empty = document.createElement("p"); empty.className = "notice"; empty.textContent = "No encontramos publicaciones con esta etiqueta."; content.append(empty);
+      const empty = document.createElement("p"); empty.className = "notice"; empty.textContent = data.tag ? "No encontramos publicaciones con esta etiqueta." : "Todavía no hay publicaciones en el blog."; content.append(empty);
     }
     archiveSection.hidden = !data.featured;
     archive.replaceChildren(...data.items.map((text) => renderCard(text)));
     if (!data.archiveTotal) {
       const empty = document.createElement("p"); empty.className = "empty-state"; empty.textContent = "Todavía no hay publicaciones anteriores."; archive.append(empty);
     }
-    document.querySelectorAll("[data-featured-sample]").forEach((node) => { node.hidden = !isExamplePost(data.featured?.id); });
+    document.querySelectorAll("[data-featured-sample]").forEach((node) => { node.hidden = !data.featured?.sample; });
     const start = data.archiveTotal ? (data.page - 1) * data.pageSize + 1 : 0;
     results.textContent = data.archiveTotal ? `${start}–${Math.min(data.page * data.pageSize, data.archiveTotal)} de ${data.archiveTotal} publicaciones anteriores · Página ${data.page} de ${data.pages}` : "No hay publicaciones anteriores.";
     const tagLabel = data.tags.find((item) => item.key === data.tag)?.name || data.tag;
@@ -315,14 +320,17 @@ export async function initFeaturedView(storage = window.localStorage, reload = a
     }
     pageLink("Siguiente", data.page + 1, data.page === data.pages);
     pagination.hidden = data.pages === 1;
+    loaded = true;
     if (location.hash === "#publicaciones-anteriores" && data.featured) archiveSection.scrollIntoView();
   }
 
-  async function refresh() {
+  async function refresh(event) {
+    const revision = isReader ? ++requestRevision : null;
+    const finish = isReader ? beginLoading(content, { label: "Cargando publicación", shape: "article", count: 1, show: !loaded }) : () => {};
     try {
       if (!isReader) {
         if (!cloud) localEntries = loadShowcase(storage);
-        await renderBlog();
+        await renderBlog(!loaded || event?.type === "popstate");
         return;
       }
       let texts = [];
@@ -334,33 +342,26 @@ export async function initFeaturedView(storage = window.localStorage, reload = a
         await reload();
         texts = loadShowcase(storage);
       }
+      if (revision !== requestRevision) return;
       content.replaceChildren(...[...initial.childNodes].map((node) => node.cloneNode(true)));
       content.hidden = false;
       errorNotice.hidden = true;
       document.title = originalTitle;
       document.querySelector('meta[name="description"]').content = originalDescription;
-      if (!texts.length && (!requested || isExamplePost(requested))) {
-        const sample = requested === COAUTHORED_SAMPLE.id ? COAUTHORED_SAMPLE : null;
-        if (sample) {
-          const summary = fill(content, sample);
-          document.title = `${sample.title} · Blog`;
-          document.querySelector('meta[name="description"]').content = summary;
-        } else fillTags(content, ["Relato breve"]);
-        content.querySelector(".eyebrow").textContent = "Blog · Ejemplo ficticio";
-        document.querySelectorAll("[data-featured-sample]").forEach((node) => { node.hidden = false; });
-        await initReactions(content, sample?.id || "ejemplo", storage, cloud, getEditorial);
-        return;
-      }
       document.querySelectorAll("[data-featured-sample]").forEach((node) => { node.hidden = true; });
       if (isReader) {
         const text = requested ? texts.find((item) => item.id === requested) : editorialPage(texts).featured;
         if (!text) throw new Error("No encontramos esta publicación. Vuelve al blog para elegir un texto disponible.");
         const summary = fill(content, text);
+        document.querySelectorAll("[data-featured-sample]").forEach((node) => { node.hidden = !text.sample; });
         document.title = `${text.title} · Blog`;
         document.querySelector('meta[name="description"]').content = summary;
+        loaded = true;
+        finish();
         await initReactions(content, text.id, storage, cloud, getEditorial);
       }
     } catch (error) {
+      if (isReader && revision !== requestRevision) return;
       content.hidden = true;
       errorNotice.hidden = false;
       errorNotice.textContent = `No se pudo cargar ${isReader ? "la publicación" : "el blog"}. ${error.message} No se han sustituido los datos. Revisa el texto desde Administración local.`;
@@ -369,7 +370,7 @@ export async function initFeaturedView(storage = window.localStorage, reload = a
       if (sidebar) sidebar.hidden = true;
       if (results) results.textContent = "";
       if (filterStatus) filterStatus.hidden = true;
-    }
+    } finally { finish(); }
   }
   window.addEventListener("popstate", refresh);
   await refresh();

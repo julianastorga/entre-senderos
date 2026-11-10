@@ -17,6 +17,8 @@ export function createOfferingAdmin(kind, onSaved) {
     <div class="field"><label for="${prefix}-description">Descripción breve *</label><textarea id="${prefix}-description" name="description" rows="3" required maxlength="1500"></textarea></div>
     ${kind === "programs" ? `
     <div class="field"><label for="program-modality">Modalidad *</label><input id="program-modality" name="modality" required maxlength="120" value="Taller corto" placeholder="Taller corto"></div>
+    <div class="field"><label for="program-overview">En qué consiste</label><textarea id="program-overview" name="overview" rows="5" maxlength="20000" placeholder="Qué se hará durante el taller y cómo se trabajará."></textarea></div>
+    <div class="field"><label for="program-audience">A quién está dirigido</label><textarea id="program-audience" name="audience" rows="5" maxlength="20000" placeholder="Personas a quienes se dirige la propuesta y experiencia previa, si corresponde."></textarea></div>
     <div class="field"><label for="program-objectives">Objetivos</label><textarea id="program-objectives" name="objectives" rows="5" maxlength="20000" placeholder="Qué aprenderán y practicarán las personas participantes."></textarea></div>
     <div class="field"><label for="program-requiredReading">Lecturas recomendadas</label><textarea id="program-requiredReading" name="requiredReading" rows="5" maxlength="20000" placeholder="Libros, autorías y sugerencias de lectura."></textarea><p class="field-hint">Lecturas opcionales para acompañar el taller. Los campos vacíos se mostrarán como pendientes de publicación.</p></div>` : ""}
     <div class="field"><label for="${prefix}-details">Detalles adicionales de la propuesta</label><textarea id="${prefix}-details" name="details" rows="7" maxlength="20000" placeholder="Contenidos, destinatarios, metodología..."></textarea></div>
@@ -93,7 +95,7 @@ export function createOfferingAdmin(kind, onSaved) {
         edit.addEventListener("click", () => {
           if (editing && !confirm("¿Descartar la edición actual?")) return;
           editing = structuredClone(offering);
-          for (const key of ["name", "description", "details", "accent", ...(kind === "programs" ? ["modality", "objectives", "requiredReading"] : [])]) form.elements[key].value = offering[key];
+          for (const key of ["name", "description", "details", "accent", ...(kind === "programs" ? ["modality", "overview", "audience", "objectives", "requiredReading"] : [])]) form.elements[key].value = offering[key];
           cover.set(offering.coverImage);
           cancel.hidden = false; title.textContent = `Editar ${label}`; status.textContent = ""; form.elements.name.focus();
         });

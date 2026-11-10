@@ -25,6 +25,9 @@ export function createCalendar() {
   let workshops = [];
   let visibleMonth = null;
   let selectedDate = null;
+  previous.disabled = true;
+  next.disabled = true;
+  filter.disabled = true;
 
   function eventsForSelection() {
     return workshops.filter((workshop) => filter.value === "all" || workshop.id === filter.value).flatMap((workshop) =>
@@ -168,7 +171,18 @@ export function createCalendar() {
   });
 
   return {
+    unavailable() {
+      previous.disabled = true;
+      next.disabled = true;
+      filter.disabled = true;
+      heading.textContent = "Calendario no disponible";
+      summary.textContent = "No se pudo cargar el calendario. Revisa la conexión y vuelve a intentarlo.";
+      grid.replaceChildren();
+      list.replaceChildren();
+      agenda.hidden = true;
+    },
     update(updated) {
+      filter.disabled = false;
       workshops = updated;
       const selection = filter.value;
       filter.replaceChildren(new Option("Todos los talleres", "all"));

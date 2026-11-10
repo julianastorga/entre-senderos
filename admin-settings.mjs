@@ -1,6 +1,7 @@
 import { CLOUD_MODE } from "./app-config.mjs";
 import { apiRequest } from "./content-store.mjs";
 import { loadContacts, saveContacts, contactsVersion } from "./contact-settings.mjs";
+import { beginLoading } from "./loading.mjs";
 
 const el = (tag, text, className) => {
   const node = document.createElement(tag); if (text !== undefined) node.textContent = text; if (className) node.className = className; return node;
@@ -28,7 +29,7 @@ export async function createSettingsAdmin() {
       contactForm.querySelector("fieldset").disabled = false;
     } catch (error) { contactStatus.textContent = `No se cargaron los contactos. ${error.message}`; }
   }
-  await reloadContacts();
+  const contactsReady = reloadContacts();
   contacts.querySelector("#reload-contacts").addEventListener("click", async () => {
     if (!confirm("¿Descartar cambios sin guardar y recargar los contactos?")) return;
     await reloadContacts();
@@ -74,10 +75,12 @@ export async function createSettingsAdmin() {
   const form = panel.querySelector("#mail-settings-form");
   const campaignForm = panel.querySelector("#campaign-form");
   let settingsVersion, settings = {}, editing = null, subscriberToken, campaignToken;
+  let subscribersLoaded = false, campaignsLoaded = false;
   panel.querySelector("#mail-redirect").textContent = `${location.origin}/api/mail/google/callback`;
   if (!CLOUD_MODE) {
     panel.querySelector("#mail-readiness").textContent = "Los contactos se pueden probar localmente. La conexión de Google, la lista privada y las campañas solo están disponibles en Azure con una sesión administradora.";
     panel.querySelectorAll("button").forEach((button) => { button.disabled = true; });
+    await contactsReady;
     return;
   }
   async function run(work, output = mailStatus) {
@@ -87,6 +90,8 @@ export async function createSettingsAdmin() {
     finally { panel.inert = false; }
   }
   async function loadMail() {
+    const finish = beginLoading(panel.querySelector("#mail-readiness"), { label: "Cargando configuración de correo", shape: "lines", count: 1 });
+    try {
     const result = await apiRequest("mail/settings");
     settings = result.value; settingsVersion = result.version;
     for (const key of ["domain", "sender", "senderName", "replyTo", "clientId"]) form.elements[key].value = settings[key];
@@ -97,6 +102,7 @@ export async function createSettingsAdmin() {
     panel.querySelector("#test-mail").disabled = !settings.connected;
     panel.querySelector("#disconnect-google").disabled = !settings.connected;
     panel.querySelector("#connect-google").disabled = !settings.hasClientSecret;
+    } finally { finish(); }
   }
   form.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -116,6 +122,8 @@ export async function createSettingsAdmin() {
     run(async () => { mailStatus.textContent = (await post("mail/google/disconnect")).value.message; await loadMail(); await loadCampaigns(); });
   });
   async function loadSubscribers(append = false) {
+    const finish = beginLoading(panel.querySelector("#subscriber-list"), { label: "Cargando suscripciones", count: 2, show: !subscribersLoaded });
+    try {
     const { value } = await apiRequest(`mail/subscribers${append && subscriberToken ? `?continuationToken=${encodeURIComponent(subscriberToken)}` : ""}`);
     const list = panel.querySelector("#subscriber-list");
     if (!append) list.replaceChildren();
@@ -142,8 +150,12 @@ export async function createSettingsAdmin() {
     subscriberToken = value.continuationToken;
     panel.querySelector("#more-subscribers").hidden = !subscriberToken;
     if (!list.children.length) list.append(el("p", "No hay solicitudes del boletín."));
+    subscribersLoaded = true;
+    } finally { finish(); }
   }
   async function loadCampaigns(append = false) {
+    const finish = beginLoading(panel.querySelector("#campaign-list"), { label: "Cargando campañas", count: 2, show: !campaignsLoaded });
+    try {
     const { value } = await apiRequest(`mail/campaigns${append && campaignToken ? `?continuationToken=${encodeURIComponent(campaignToken)}` : ""}`);
     const list = panel.querySelector("#campaign-list");
     if (!append) list.replaceChildren();
@@ -194,6 +206,8 @@ export async function createSettingsAdmin() {
     campaignToken = value.continuationToken;
     panel.querySelector("#more-campaigns").hidden = !campaignToken;
     if (!list.children.length) list.append(el("p", "No hay campañas guardadas."));
+    campaignsLoaded = true;
+    } finally { finish(); }
   }
   campaignForm.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -217,5 +231,5 @@ export async function createSettingsAdmin() {
     campaignStatus.textContent = value.waitingForProvider ? "Los envíos siguen pausados: conecta y habilita Google Workspace." : value.busy ? "Otro proceso está enviando. Actualiza el estado en unos momentos." : `Se procesaron ${value.processed} destinatarios. ${value.remaining ? "Quedan pendientes; el programador continuará por lotes." : ""}`;
     await loadCampaigns();
   }, campaignStatus));
-  await run(async () => { await loadMail(); await Promise.all([loadSubscribers(), loadCampaigns()]); });
+  await Promise.all([contactsReady, run(async () => { await loadMail(); await Promise.all([loadSubscribers(), loadCampaigns()]); })]);
 }

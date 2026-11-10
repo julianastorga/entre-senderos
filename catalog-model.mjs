@@ -27,6 +27,8 @@ export function validateOffering(input, { allowDataImages = !CLOUD_MODE } = {}) 
 export function validateProgram(input, options) {
   const program = validateOffering(input, options);
   for (const [field, label, maximum, initial] of [
+    ["overview", "en qué consiste", 20000, ""],
+    ["audience", "a quién está dirigido", 20000, ""],
     ["objectives", "objetivos", 20000, ""],
     // Keep the stored key so existing catalogs retain their reading lists.
     ["requiredReading", "lecturas recomendadas", 20000, ""],
