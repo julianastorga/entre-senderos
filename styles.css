@@ -89,13 +89,13 @@ fieldset { margin: 0; padding: 0; border: 0; min-width: 0; }
 .footer-main { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 25px; padding-block: 30px; font-size: 14px; color: var(--muted); }
 .developer-credit { display: inline-flex; align-items: center; min-height: 44px; }
 .footer-links { display: flex; flex-wrap: wrap; gap: 20px; }
-.table-scroll { overflow-x: auto; }
-.pricing-table { width: 100%; border-collapse: collapse; text-align: left; min-width: 750px; font-size: 16px; }
-.pricing-table caption { text-align: left; color: var(--muted); padding-bottom: 17px; font-size: 14px; }
-.pricing-table th, .pricing-table td { border-bottom: 1px solid var(--line); padding: 18px 24px 18px 0; vertical-align: top; }
-.pricing-table th { font-weight: 600; }
-.pricing-table td small { display: block; color: var(--muted); }
-.pricing-table .workshop-cell { border-left: 12px solid var(--workshop-accent); padding-left: 16px; }
+.upcoming-editions { display: grid; gap: 18px; list-style: none; padding: 0; margin: 0; }
+.upcoming-edition { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; align-items: center; gap: 25px; padding: 24px; border: 1px solid var(--line); border-left: 5px solid var(--workshop-accent); border-radius: 4px; }
+.upcoming-edition > * { min-width: 0; }
+.upcoming-edition h3 { font-size: 26px; margin-block: 8px; overflow-wrap: anywhere; }
+.upcoming-edition p, .upcoming-edition dl { color: var(--muted); font-size: 15px; margin: 0; }
+.upcoming-edition dl > div { display: grid; grid-template-columns: 55px minmax(0, 1fr); gap: 10px; }
+.upcoming-edition dd { text-align: left; }
 .calendar-layout { display: grid; grid-template-columns: 1.4fr 1fr; align-items: start; gap: 30px; }
 .calendar-panel { padding: 26px; border: 1px solid var(--line); border-radius: 4px; min-width: 0; }
 .calendar-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 15px; }
@@ -331,6 +331,8 @@ fieldset { margin: 0; padding: 0; border: 0; min-width: 0; }
   .calendar-layout, .contact-layout, .admin-layout { grid-template-columns: 1fr; }
   .showcase-admin-layout { grid-template-columns: 1fr; grid-template-areas: "saved" "editor"; }
   .enrollment-list { grid-template-columns: minmax(0, 1fr); }
+  .upcoming-edition { grid-template-columns: minmax(0, 1fr); gap: 18px; }
+  .upcoming-edition .button { justify-self: start; }
   .blog-layout { grid-template-columns: minmax(0, 1fr); grid-template-areas: "sidebar" "main"; gap: 28px; }
   .schedule-list { grid-template-columns: 1fr 1fr; }
   .calendar-toolbar h2 { font-size: 30px; }
