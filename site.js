@@ -1,4 +1,5 @@
-import { STORAGE_KEY, WORKSHOP_ACCENTS, sessionDates, upcomingEditions, formatDate, formatWorkshopPrices, formatSchedule, formatCadence } from "./workshops.mjs";
+import { STORAGE_KEY, WORKSHOP_ACCENTS, sessionDates, upcomingEditions, enrollmentOpen, enrollmentClosesAt, formatDate, formatWorkshopPrices, formatSchedule, formatCadence } from "./workshops.mjs";
+import { editionSignup, newsletterInvitation } from "./enrollment-view.mjs";
 import { CATALOG_KEY, loadCatalog, flattenInstances } from "./catalog-model.mjs";
 import { createCalendar } from "./calendar.mjs";
 import { createAdmin } from "./admin.mjs";
@@ -226,12 +227,13 @@ function renderCatalog(catalog) {
       card.append(element("p", type === "taller" ? "Taller de escritura" : "Servicio personalizado", "eyebrow"));
       if (offering.coverImage) card.append(imageElement(offering.coverImage, "workshop-cover"));
       card.append(element("h3", offering.name), element("p", offering.description));
-      const count = upcoming.filter((instance) => instance.programId === offering.id).length;
+      const count = workshops.filter((instance) => instance.programId === offering.id && enrollmentOpen(instance)).length;
       card.append(element("p", type === "servicio" ? "Consulta el formato y las condiciones." : count ? `${count} ${count === 1 ? "próxima edición" : "próximas ediciones"}` : "Próximas fechas por anunciar.", "small-print"));
       const link = element("a", type === "taller" ? "Conocer el taller y sus ediciones" : "Conocer el servicio", "text-link");
       link.href = `propuesta.html?tipo=${type}&id=${encodeURIComponent(offering.id)}`;
       link.setAttribute("aria-label", `${link.textContent}: ${offering.name}`);
       card.append(link);
+      if (type === "taller" && !count) card.append(newsletterInvitation("Suscríbete al boletín para recibir las nuevas fechas de este taller."));
       container.append(card);
       });
     });
@@ -291,17 +293,14 @@ function renderCatalog(catalog) {
       const editions = element("section", undefined, "section");
       editions.append(element("h2", "Ediciones y próximas fechas"));
       const instances = workshops.filter((instance) => instance.programId === offering.id);
-      if (!instances.length) editions.append(element("p", "Todavía no hay ediciones programadas. Puedes consultar futuras fechas desde Contacto.", "empty-state"));
+      if (!instances.length) editions.append(newsletterInvitation("Todavía no hay ediciones programadas. Recibe las próximas fechas en el boletín."));
       const grid = element("div", undefined, "course-grid");
       for (const instance of instances) {
         const dates = sessionDates(instance);
         const card = element("article", undefined, "course-card");
         card.style.setProperty("--workshop-accent", WORKSHOP_ACCENTS[offering.accent].color);
         card.append(element("h3", instance.code), element("p", `${formatDate(dates[0])} – ${formatDate(dates.at(-1))}`), element("p", `${formatCadence(instance)} · ${instance.sessions} encuentros`), element("p", formatSchedule(instance)), element("p", formatWorkshopPrices(instance)));
-        const signup = element("a", "Inscribirme en esta edición", "button");
-        signup.setAttribute("aria-label", `Inscribirme en esta edición: ${instance.code}`);
-        signup.href = `contacto.html?edicion=${encodeURIComponent(instance.id)}#inscripcion`;
-        card.append(signup); grid.append(card);
+        card.append(editionSignup(instance, { label: "Inscribirme en esta edición" })); grid.append(card);
       }
       editions.append(grid); detail.append(editions);
     }
@@ -309,7 +308,11 @@ function renderCatalog(catalog) {
   const editions = document.querySelector("[data-upcoming-editions]");
   if (editions) {
     editions.replaceChildren();
-    if (!upcoming.length) editions.append(element("li", "No hay próximas ediciones programadas. Las nuevas fechas se publicarán aquí.", "empty-state"));
+    if (!upcoming.length) {
+      const empty = element("li");
+      empty.append(newsletterInvitation("No hay próximas ediciones programadas. Recibe las nuevas fechas en el boletín."));
+      editions.append(empty);
+    }
     upcoming.forEach((workshop) => {
       const dates = sessionDates(workshop);
       const row = element("li", undefined, "upcoming-edition");
@@ -332,10 +335,7 @@ function renderCatalog(catalog) {
         range.append(entry);
       }
       schedule.append(range, element("p", formatSchedule(workshop)));
-      const signup = element("a", "Inscribirme", "button");
-      signup.setAttribute("aria-label", `Inscribirme: ${workshop.name} · ${workshop.code}`);
-      signup.href = `contacto.html?edicion=${encodeURIComponent(workshop.id)}#inscripcion`;
-      row.append(summary, schedule, signup);
+      row.append(summary, schedule, editionSignup(workshop));
       editions.append(row);
     });
   }
@@ -344,25 +344,47 @@ function renderCatalog(catalog) {
     const params = new URLSearchParams(location.search);
     const editionId = params.get("edicion");
     const serviceId = params.get("servicio");
-    const selected = select.value || params.get("curso");
+    const selected = select.value || select.form.dataset.closedEdition || params.get("curso");
+    select.form.hidden = false;
+    delete select.form.dataset.closedEdition;
+    document.querySelector("#signup-closed").hidden = true;
+    document.querySelector("#inscripcion h2").textContent = "Solicitud de inscripción";
+    document.querySelector(".form-intro").textContent = signupIntro;
     if (editionId && serviceId) throw new Error("El enlace de solicitud no es válido.");
     select.replaceChildren(new Option("Elige una opción", ""));
     if (editionId || serviceId) {
       const instance = workshops.find((item) => item.id === editionId);
       const service = catalog.services.find((item) => item.id === serviceId);
       if (!instance && !service) throw new Error("La edición o el servicio de este enlace ya no está disponible.");
+      if (instance && !enrollmentOpen(instance)) { closeSignup(instance); return; }
       select.replaceChildren(instance ? signupEditionOption(instance, true) : new Option(service.name, `servicio:${service.id}`, true, true));
       document.querySelector("#inscripcion h2").textContent = instance ? `Inscripción: ${instance.name} · ${instance.code}` : `Consulta: ${service.name}`;
       if (instance) document.querySelector(".form-intro").textContent = `${formatDate(instance.startDate)} · ${formatCadence(instance)} · ${formatSchedule(instance)}. La solicitud no confirma un lugar ni realiza un cobro.`;
       updateSignupPrice();
       return;
     }
-    workshops.forEach((workshop) => select.add(signupEditionOption(workshop)));
+    const previous = workshops.find((instance) => instance.id === selected);
+    if (previous && !enrollmentOpen(previous)) { closeSignup(previous); return; }
+    workshops.filter((workshop) => enrollmentOpen(workshop)).forEach((workshop) => select.add(signupEditionOption(workshop)));
     catalog.services.forEach((service) => select.add(new Option(`Servicio: ${service.name}`, `servicio:${service.id}`)));
     select.add(new Option("Me gustaría recibir orientación", "orientacion"));
     if ([...select.options].some((option) => option.value === selected)) select.value = selected;
     updateSignupPrice();
   }
+}
+
+function closeSignup(instance, focus = false) {
+  const form = document.querySelector("#signup-course").form;
+  const moveFocus = focus || form.contains(document.activeElement);
+  form.dataset.closedEdition = instance.id;
+  form.hidden = true;
+  form.querySelector("[data-preview-fields]").disabled = true;
+  document.querySelector("#inscripcion h2").textContent = "Inscripciones cerradas";
+  document.querySelector(".form-intro").textContent = `${instance.name} · ${instance.code}. Esta edición ya comenzó y no admite nuevas solicitudes.`;
+  const alternative = document.querySelector("#signup-closed");
+  alternative.replaceChildren(newsletterInvitation());
+  alternative.hidden = false;
+  if (moveFocus) alternative.querySelector("a").focus();
 }
 
 function signupEditionOption(instance, selected = false) {
@@ -387,7 +409,7 @@ document.querySelectorAll("[data-preview-form]").forEach((form) => {
   initPhoneInput(form);
   if (form.elements.course) form.addEventListener("reset", () => queueMicrotask(updateSignupPrice));
   const requiredFields = [...form.querySelectorAll("[required]")];
-  const status = form.querySelector(".form-status");
+  const status = form.querySelector(".form-status") || document.querySelector("#signup-status");
   let newsletterSubmitted = false;
   function validateField(field) {
     let message = "";
@@ -408,6 +430,19 @@ document.querySelectorAll("[data-preview-form]").forEach((form) => {
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (newsletterSubmitted) return;
+    let instance;
+    if (form.elements.course) {
+      try {
+        instance = flattenInstances(loadCatalog(contentStorage)).find((item) => item.id === form.elements.course.value);
+        if (form.dataset.closedEdition || (instance && !enrollmentOpen(instance))) {
+          if (instance) closeSignup(instance, true);
+          return;
+        }
+      } catch (error) {
+        status.textContent = `No se pudo comprobar la disponibilidad. ${error.message}`;
+        return;
+      }
+    }
     const invalidFields = requiredFields.filter((field) => !validateField(field));
     if (invalidFields.length) {
       status.textContent = "Revisa los campos señalados para continuar con la prueba.";
@@ -429,8 +464,9 @@ document.querySelectorAll("[data-preview-form]").forEach((form) => {
         if (form.classList.contains("newsletter-form")) newsletterSubmitted = true;
       } catch (error) {
         status.textContent = `No se confirmó el envío. ${error.message}`;
+        if (instance && error.status === 409) closeSignup(instance, true);
       } finally {
-        fields.disabled = newsletterSubmitted;
+        fields.disabled = newsletterSubmitted || Boolean(form.dataset.closedEdition);
         button.disabled = newsletterSubmitted;
       }
       return;
@@ -465,6 +501,7 @@ document.querySelectorAll("[data-preview-form]").forEach((form) => {
   }
 });
 
+const signupIntro = document.querySelector(".form-intro")?.textContent;
 const calendar = createCalendar();
 const admin = canAdminister ? createAdmin(refreshWorkshops) : null;
 const viewsReady = [
@@ -514,6 +551,15 @@ if (adminTabs && canAdminister) {
 }
 
 let catalogLoaded = false;
+let signupRefreshTimer;
+const publicCatalog = document.querySelector("[data-workshop-cards], [data-service-cards], [data-offering-detail], [data-upcoming-editions], #signup-course, #calendar-grid");
+function scheduleSignupRefresh(workshops) {
+  clearTimeout(signupRefreshTimer);
+  if (!publicCatalog) return;
+  const now = new Date();
+  const next = Math.min(...workshops.filter((workshop) => enrollmentOpen(workshop, now)).map(enrollmentClosesAt));
+  if (Number.isFinite(next)) signupRefreshTimer = setTimeout(refreshWorkshops, Math.min(next - now.getTime() + 1, 2_147_483_647));
+}
 async function refreshWorkshops() {
   const alert = document.querySelector("#data-error");
   const finish = [
@@ -531,7 +577,8 @@ async function refreshWorkshops() {
     calendar?.update(workshops);
     admin?.update(catalog);
     const signup = document.querySelector("#signup-course");
-    if (signup) signup.closest("[data-preview-fields]").disabled = false;
+    if (signup) signup.closest("[data-preview-fields]").disabled = signup.form.hidden;
+    scheduleSignupRefresh(workshops);
     catalogLoaded = true;
   } catch (error) {
     alert.textContent = `No se pudo cargar el catálogo. ${error.message} No se han sustituido tus datos. ${CLOUD_MODE ? "Revisa la conexión y vuelve a intentarlo." : "Revisa el almacenamiento del navegador o importa una copia válida desde Administración local."}`;
@@ -540,6 +587,7 @@ async function refreshWorkshops() {
     const select = document.querySelector("#signup-course");
     if (select) {
       select.replaceChildren(new Option("Catálogo no disponible", ""));
+      select.closest("[data-preview-fields]").disabled = true;
       updateSignupPrice();
     }
     calendar?.unavailable();
@@ -552,7 +600,7 @@ async function refreshWorkshops() {
 if (document.querySelector("[data-workshop-cards], [data-service-cards], [data-offering-detail], [data-upcoming-editions], #signup-course, #calendar-grid, #workshop-form")) {
   await refreshWorkshops();
   window.addEventListener("content-changed", refreshWorkshops);
-  if (CLOUD_MODE) window.addEventListener("focus", refreshWorkshops);
+  if (CLOUD_MODE || publicCatalog) window.addEventListener("focus", refreshWorkshops);
   window.addEventListener("storage", (event) => {
     if ([STORAGE_KEY, CATALOG_KEY, null].includes(event.key)) refreshWorkshops();
   });

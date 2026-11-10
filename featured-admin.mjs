@@ -28,6 +28,7 @@ export async function createFeaturedAdmin() {
   const upload = document.querySelector("#text-upload");
   const list = document.querySelector("#showcase-texts");
   const formTitle = document.querySelector("#text-form-title");
+  const disclosure = form.closest("details");
   const readingLink = document.querySelector("#text-reading-link");
   const toolbar = form.querySelector(".editor-toolbar");
   const tools = [...toolbar.querySelectorAll("[data-text-command], [data-text-image], [data-text-link]")];
@@ -146,6 +147,7 @@ export async function createFeaturedAdmin() {
       edit.addEventListener("click", () => {
         if (dirty && !window.confirm("¿Descartar los cambios del editor para abrir este texto?")) return;
         fillEditor(text);
+        disclosure.open = true;
         status.textContent = "Texto cargado para editar. Los cambios se aplicarán al guardar.";
         title.focus();
       });
@@ -216,6 +218,7 @@ export async function createFeaturedAdmin() {
   document.querySelector("#new-showcase-text").addEventListener("click", () => {
     if (dirty && !window.confirm("¿Descartar los cambios del editor y crear un texto nuevo?")) return;
     fillEditor();
+    disclosure.open = true;
     status.textContent = "Nuevo texto. Los relatos guardados se conservarán.";
     title.focus();
   });

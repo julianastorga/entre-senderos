@@ -10,8 +10,8 @@ export function createOfferingAdmin(kind, onSaved) {
   const prefix = kind === "programs" ? "program" : "service";
   const label = kind === "programs" ? "taller" : "servicio";
   container.innerHTML = `
-    <section class="admin-layout section"><div class="form-panel">
-    <h2 id="${prefix}-form-title">Crear ${label}</h2>
+    <section class="admin-layout section"><div><details class="form-panel admin-create">
+    <summary id="${prefix}-form-title">Crear ${label}</summary>
     <form id="${prefix}-form"><fieldset disabled><legend class="sr-only">Definición del ${label}</legend>
     <div class="field"><label for="${prefix}-name">Nombre *</label><input id="${prefix}-name" name="name" required minlength="3" maxlength="100"></div>
     <div class="field"><label for="${prefix}-description">Descripción breve *</label><textarea id="${prefix}-description" name="description" rows="3" required maxlength="1500"></textarea></div>
@@ -32,13 +32,14 @@ export function createOfferingAdmin(kind, onSaved) {
     <div id="${prefix}-cover-preview" class="cover-preview" hidden></div><button id="${prefix}-cover-remove" type="button" class="text-button" hidden>Quitar portada</button></fieldset>
     <div class="field"><label for="${prefix}-accent">Acento verde *</label><select id="${prefix}-accent" name="accent" required></select></div>
     <div class="button-row"><button type="submit" class="button">Guardar ${label}</button><button type="button" class="button button-outline" data-cancel hidden>Cancelar edición</button></div>
-    </fieldset><p class="form-status" role="status" aria-live="polite"></p></form></div>
+    </fieldset></form></details><p class="form-status" role="status" aria-live="polite"></p></div>
     <aside><h2 class="aside-heading">${kind === "programs" ? "Talleres definidos" : "Servicios disponibles"}</h2><p>${kind === "programs" ? "Define aquí la propuesta. Crea sus fechas en la pestaña Ediciones." : "Las consultas se reciben desde Contacto; los servicios no añaden encuentros al calendario."}</p><div class="admin-workshops" data-offering-list></div></aside></section>`;
   const form = container.querySelector("form");
   const status = container.querySelector('[role="status"]');
   const fieldset = form.querySelector("fieldset");
   const panel = container.closest('[role="tabpanel"]');
-  const title = container.querySelector("h2");
+  const title = container.querySelector(`#${prefix}-form-title`);
+  const disclosure = form.closest("details");
   const cancel = form.querySelector("[data-cancel]");
   const cover = createCoverUpload(form, prefix, status, () => {});
   for (const [value, accent] of Object.entries(WORKSHOP_ACCENTS)) form.elements.accent.add(new Option(accent.label, value));
@@ -102,6 +103,7 @@ export function createOfferingAdmin(kind, onSaved) {
           for (const key of ["name", "description", "details", "accent", ...(kind === "programs" ? ["modality", "overview", "audience", "objectives", "requiredReading"] : [])]) form.elements[key].value = offering[key];
           if (kind === "programs") for (const field of ["priceCRC", "priceUSD"]) form.elements[field].value = offering[field] ?? "";
           cover.set(offering.coverImage);
+          disclosure.open = true;
           cancel.hidden = false; title.textContent = `Editar ${label}`; status.textContent = ""; form.elements.name.focus();
         });
         const remove = document.createElement("button");
