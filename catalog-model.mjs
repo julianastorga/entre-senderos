@@ -39,6 +39,14 @@ export function validateProgram(input, options) {
     program[field] = value.trim();
   }
   if (!program.modality) throw new Error("Indica la modalidad del taller, por ejemplo: Taller corto.");
+  for (const [field, currency, legacy] of [["priceCRC", "CRC", null], ["priceUSD", "USD", WORKSHOP_PRICE]]) {
+    const value = input[field] === undefined ? legacy : input[field];
+    if (value !== null && (typeof value !== "number" || !Number.isFinite(value) || value < 0 ||
+      Number(value.toFixed(2)) !== value || !Number.isSafeInteger(Math.round(value * 100)))) {
+      throw new Error(`El precio en ${currency} debe ser un importe no negativo con hasta dos decimales, o quedar pendiente.`);
+    }
+    program[field] = value;
+  }
   return program;
 }
 
@@ -53,8 +61,8 @@ export function validateCatalogV2(input, options) {
     if (!program) throw new Error("Cada edición debe pertenecer a un taller existente. Elimina primero sus ediciones antes de quitar un taller.");
     const valid = validateWorkshop({ ...candidate, name: program.name, description: program.description, accent: program.accent, coverImage: undefined }, instances, options);
     if (instances.some((item) => item.id === valid.id)) throw new Error("Hay ediciones con identificadores repetidos.");
-    const { id, code, startDate, startTime, endTime, timeZone, cadence, weekInterval, weekdays, sessions, price } = valid;
-    instances.push({ id, programId: program.id, code, startDate, startTime, endTime, timeZone, cadence, weekInterval, weekdays, sessions, price });
+    const { id, code, startDate, startTime, endTime, timeZone, cadence, weekInterval, weekdays, sessions } = valid;
+    instances.push({ id, programId: program.id, code, startDate, startTime, endTime, timeZone, cadence, weekInterval, weekdays, sessions, price: program.priceUSD });
   }
   return { version: 2, programs, instances, services };
 }
@@ -87,7 +95,7 @@ export function migrateWorkshops(workshops, options) {
 export function flattenInstances(catalog) {
   return catalog.instances.map((instance) => {
     const program = catalog.programs.find((item) => item.id === instance.programId);
-    return { ...instance, name: program.name, description: program.description, accent: program.accent, price: WORKSHOP_PRICE, ...(program.coverImage ? { coverImage: program.coverImage } : {}) };
+    return { ...instance, name: program.name, description: program.description, accent: program.accent, price: program.priceUSD, priceCRC: program.priceCRC, priceUSD: program.priceUSD, ...(program.coverImage ? { coverImage: program.coverImage } : {}) };
   });
 }
 

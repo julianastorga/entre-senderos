@@ -7,6 +7,7 @@ import { migrateWorkshops } from "../catalog-model.mjs";
 import { DEFAULT_WORKSHOPS } from "../workshops.mjs";
 import { validateNewsletterEmail } from "../email-validation.mjs";
 import { verifyMailDomain } from "../server/mail-domain.mjs";
+import { DEFAULT_PAGE_COPY } from "../page-copy-model.mjs";
 
 class MemoryStore {
   data = new Map();
@@ -138,6 +139,62 @@ test("workshop sections are shared and validated, and older edition editors cann
   assert.equal(cleared.body.programs[0].modality, catalog.programs[0].modality);
   assert.equal(cleared.body.programs[0].overview, "");
   assert.equal(cleared.body.programs[0].audience, "");
+});
+
+test("workshop prices are admin-editable in both currencies, inherited by editions and preserved for older editors", async () => {
+  const { api } = create();
+  const initial = await api(request("catalog"));
+  const catalog = structuredClone(initial.body);
+  catalog.programs[0].priceCRC = 32500.25;
+  catalog.programs[0].priceUSD = 72.5;
+  catalog.instances.push({ ...catalog.instances[0], id: "niebla-two", code: "NIE-02", startDate: "2027-02-02", price: 999 });
+  assert.equal((await api(request("catalog", "PUT", catalog))).status, 401);
+  const saved = await api(request("catalog", "PUT", catalog, { ...admin, "if-match": initial.headers.ETag }));
+  assert.equal(saved.status, 200);
+  const publicCatalog = await api(request("catalog"));
+  assert.equal(publicCatalog.body.programs[0].priceCRC, 32500.25);
+  assert.equal(publicCatalog.body.programs[0].priceUSD, 72.5);
+  const publicEditions = (await api(request("workshops"))).body.workshops.filter(({ programId }) => programId === "niebla");
+  assert.deepEqual(publicEditions.map(({ priceCRC, priceUSD, price }) => [priceCRC, priceUSD, price]), [[32500.25, 72.5, 72.5], [32500.25, 72.5, 72.5]]);
+  const oldClient = { ...saved.body, programs: saved.body.programs.map(({ priceCRC, priceUSD, ...program }) => program) };
+  oldClient.instances[0].code = "NIE-UPDATED";
+  oldClient.instances[0].price = 50;
+  const retained = await api(request("catalog", "PUT", oldClient, { ...admin, "if-match": saved.headers.ETag }));
+  assert.equal(retained.status, 200);
+  assert.deepEqual(retained.body.programs, saved.body.programs);
+  assert.equal(retained.body.instances[0].code, "NIE-UPDATED");
+  assert.equal(retained.body.instances[0].price, 72.5);
+  const partial = structuredClone(retained.body);
+  delete partial.programs[0].priceUSD;
+  partial.programs[0].priceCRC = 0;
+  const changed = await api(request("catalog", "PUT", partial, { ...admin, "if-match": retained.headers.ETag }));
+  assert.equal(changed.status, 200);
+  assert.equal(changed.body.programs[0].priceCRC, 0);
+  assert.equal(changed.body.programs[0].priceUSD, 72.5);
+  const cleared = structuredClone(changed.body);
+  cleared.programs[0].priceCRC = null;
+  cleared.programs[0].priceUSD = null;
+  const result = await api(request("catalog", "PUT", cleared, { ...admin, "if-match": changed.headers.ETag }));
+  assert.equal(result.status, 200);
+  assert.equal(result.body.programs[0].priceCRC, null);
+  assert.equal(result.body.programs[0].priceUSD, null);
+  assert.equal(result.body.instances[0].price, null);
+  assert.equal((await api(request("catalog", "PUT", catalog, { ...admin, "if-match": changed.headers.ETag }))).status, 409);
+});
+
+test("invalid workshop prices reject the entire catalog write without altering saved prices", async () => {
+  const { api } = create();
+  const initial = await api(request("catalog"));
+  for (const field of ["priceCRC", "priceUSD"]) {
+    for (const value of [-1, "45", "", true, 0.001, Number.MAX_SAFE_INTEGER]) {
+      const catalog = structuredClone(initial.body);
+      catalog.programs[0][field] = value;
+      const result = await api(request("catalog", "PUT", catalog, { ...admin, "if-match": initial.headers.ETag }));
+      assert.equal(result.status, 400, `${field}: ${String(value)}`);
+      assert.match(result.body.error, /precio/u);
+    }
+  }
+  assert.deepEqual((await api(request("catalog"))).body, initial.body);
 });
 
 test("public blog pages summarize both the latest and archived posts and assign publication dates on the server", async () => {
@@ -334,6 +391,48 @@ test("reaction writes reject invalid input, cross-site requests, unavailable pos
   assert.equal((await api(request("editorial/reactions", "PUT", { reaction: "heart", active: true }, {}, { id: text.id }))).status, 404);
 });
 
+test("page copy is publicly readable, independently versioned and writable only by authorized administrators", async () => {
+  const { api, store } = create();
+  const initial = await api(request("settings/pages"));
+  assert.equal(initial.status, 200);
+  assert.deepEqual(initial.body, DEFAULT_PAGE_COPY);
+  assert.equal(initial.headers["Cache-Control"], "no-store");
+  assert.equal(store.data.has("page-copy"), false);
+  const catalog = await api(request("catalog"));
+  const input = structuredClone(initial.body);
+  input.pages.home.title = "Un nuevo espacio";
+  input.pages.services.intro = "Una propuesta a medida.";
+  input.pages.workshops.eyebrow = "";
+  input.pages.team.body = "Primera parte.\n\nSegunda parte.";
+  assert.equal((await api(request("settings/pages", "PUT", input))).status, 401);
+  assert.equal((await api(request("settings/pages", "PUT", input, { ...admin, "x-ms-client-principal": github("another-user") }))).status, 403);
+  assert.equal((await api(request("settings/pages", "PUT", input, { "x-ms-client-principal": admin["x-ms-client-principal"] }))).status, 428);
+  assert.equal((await api(request("settings/pages", "PUT", input, { ...admin, "sec-fetch-site": "cross-site" }))).status, 403);
+  assert.equal((await api(request("settings/pages", "PUT", input, { ...admin, "content-type": "text/plain" }))).status, 415);
+  assert.equal((await api(request("settings/pages", "POST", input, admin))).status, 405);
+  const saved = await api(request("settings/pages", "PUT", input, { ...admin, "if-match": initial.headers.ETag }));
+  assert.equal(saved.status, 200);
+  assert.deepEqual(saved.body, input);
+  assert.equal(saved.headers["Cache-Control"], "no-store");
+  assert.notEqual(saved.headers.ETag, initial.headers.ETag);
+  assert.deepEqual((await api(request("settings/pages"))).body, input);
+  assert.deepEqual((await api(request("catalog"))).body, catalog.body);
+  assert.equal((await api(request("settings/pages", "PUT", initial.body, { ...admin, "if-match": initial.headers.ETag }))).status, 409);
+  assert.deepEqual((await api(request("settings/pages"))).body, input);
+});
+
+test("invalid page copy cannot replace saved public text or expose unrelated configuration", async () => {
+  const { api } = create();
+  const initial = await api(request("settings/pages"));
+  for (const invalid of [null, { version: 1, pages: [] }, { ...initial.body, internal: "private" },
+    { version: 1, pages: { unknown: {} } }, { version: 1, pages: { home: { title: "" } } },
+    { version: 1, pages: { home: { title: "x".repeat(151) } } },
+    { version: 1, pages: { team: { body: "x".repeat(50001) } } }]) {
+    assert.equal((await api(request("settings/pages", "PUT", invalid, admin))).status, 400);
+  }
+  assert.deepEqual((await api(request("settings/pages"))).body, initial.body);
+});
+
 test("managed images require authenticated uploads, bounded valid bytes and accessible covers; contacts use conditional writes", async () => {
   const { api } = create();
   const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a0yYAAAAASUVORK5CYII=";
@@ -429,12 +528,13 @@ test("private enrollment pages preserve legacy records and lifecycle updates use
   assert.equal((await api(request("enrollments", "PUT", { status: "confirmed" }, initialHeaders, { id: `2025-01-01T10:00:00.000Z-${randomUUID()}` }))).status, 404);
   let version = record.version;
   for (const status of ["confirmed", "attending", "withdrawn", "completed", "interested"]) {
-    const saved = await update(status, { ...admin, "if-match": version }, { email: "must-not-replace@example.org", workshopName: "Must not replace snapshot" });
+    const saved = await update(status, { ...admin, "if-match": version }, { ...(status === "confirmed" ? { paymentMethod: "SINPE Móvil" } : {}), email: "must-not-replace@example.org", workshopName: "Must not replace snapshot" });
     assert.equal(saved.status, 200);
     assert.equal(saved.headers["Cache-Control"], "no-store");
-    const { status: savedStatus, updatedAt, ...snapshot } = saved.body;
+    const { status: savedStatus, updatedAt, paymentMethod, ...snapshot } = saved.body;
     assert.equal(savedStatus, status);
     assert.ok(Number.isFinite(Date.parse(updatedAt)));
+    assert.equal(paymentMethod, "SINPE Móvil");
     assert.deepEqual(snapshot, legacy);
     version = saved.headers.ETag;
   }
@@ -442,6 +542,93 @@ test("private enrollment pages preserve legacy records and lifecycle updates use
   assert.equal(store.data.get(`submissions/enrollment/${legacyId}`).value.status, "interested");
   const exported = await api(request("submissions", "GET", null, admin, { kind: "enrollment" }));
   assert.equal(exported.body.items.find((item) => item.email === legacy.email).status, "interested");
+});
+
+test("manual enrollments require administration and authorization, validate contacts and payment, and prevent duplicate retries", async () => {
+  const { api, store } = create();
+  const id = `${new Date().toISOString()}-${randomUUID()}`;
+  const body = { id, name: " Participante manual ", email: " Manual@Example.org ", phone: "(202) 555-0123", phoneCountry: "US", course: "niebla", consent: true, status: "confirmed", paymentMethod: " Transferencia ", message: " Nota privada " };
+  assert.equal((await api(request("enrollments", "POST", body))).status, 401);
+  assert.equal((await api(request("enrollments", "POST", body, { ...admin, "x-ms-client-principal": github("another-user") }))).status, 403);
+  assert.equal((await api(request("enrollments", "POST", body, { ...admin, "sec-fetch-site": "cross-site" }))).status, 403);
+  assert.equal((await api(request("enrollments", "POST", body, { ...admin, "content-type": "text/plain" }))).status, 415);
+  for (const invalid of [{ id: "../bad" }, { consent: false }, { course: "missing" }, { course: "servicio:talleres-personalizados" }, { name: "" }, { email: "bad" }, { phone: "123" }, { phoneCountry: "CR" }, { status: "unknown" }, { paymentMethod: "" }, { paymentMethod: null }, { paymentMethod: "x".repeat(101) }, { paymentMethod: "not\nvalid" }, { message: "x".repeat(2001) }]) {
+    assert.equal((await api(request("enrollments", "POST", { ...body, ...invalid }, admin))).status, 400, JSON.stringify(invalid));
+  }
+  assert.equal([...store.data.keys()].filter((name) => name.startsWith("submissions/enrollment/")).length, 0);
+  const saved = await api(request("enrollments", "POST", body, admin));
+  assert.equal(saved.status, 201);
+  assert.equal(saved.body.id, id);
+  assert.equal(saved.body.value.name, "Participante manual");
+  assert.equal(saved.body.value.email, "manual@example.org");
+  assert.equal(saved.body.value.phone, "+12025550123");
+  assert.equal(saved.body.value.phoneCountry, "US");
+  assert.equal(saved.body.value.editionCode, "NIE-01");
+  assert.equal(saved.body.value.paymentMethod, "Transferencia");
+  assert.equal(saved.body.value.status, "confirmed");
+  assert.equal(saved.body.value.source, "admin");
+  assert.equal(saved.headers["Cache-Control"], "no-store");
+  assert.ok(saved.headers.ETag);
+  assert.equal((await api(request("enrollments", "POST", body, admin))).status, 409);
+  assert.equal([...store.data.keys()].filter((name) => name.startsWith("submissions/enrollment/")).length, 1);
+  const publicBody = { ...body, email: "public@example.org" };
+  assert.equal((await api(request("enrollment", "POST", publicBody))).status, 202);
+  const publicRecord = store.records[0].value;
+  assert.equal(publicRecord.status, "interested");
+  assert.equal(publicRecord.paymentMethod, undefined);
+  assert.equal(publicRecord.source, undefined);
+  for (const path of ["catalog", "workshops", "editorial"]) {
+    const response = JSON.stringify((await api(request(path))).body);
+    for (const privateValue of ["manual@example.org", "Participante manual", "Nota privada", "Transferencia"]) assert.ok(!response.includes(privateValue));
+  }
+});
+
+test("confirming requires a payment method, transfers preserve contacts and provenance, and stale changes cannot overwrite assignments", async () => {
+  const { api, store } = create();
+  const body = { email: "move@example.org", name: "Prueba de traslado", course: "niebla", consent: true, phone: "+12025550123", phoneCountry: "US", message: "Mensaje original" };
+  await api(request("enrollment", "POST", body));
+  const record = (await api(request("enrollments", "GET", null, admin))).body.items[0];
+  const query = { id: record.id };
+  const headers = { ...admin, "if-match": record.version };
+  for (const paymentMethod of [undefined, "", " ", 42, null, "x".repeat(101), "bad\nmethod"]) {
+    assert.equal((await api(request("enrollments", "PUT", { status: "confirmed", paymentMethod }, headers, query))).status, 400);
+  }
+  const confirmed = await api(request("enrollments", "PUT", { status: "confirmed", paymentMethod: " SINPE Móvil " }, headers, query));
+  assert.equal(confirmed.status, 200);
+  assert.equal(confirmed.body.paymentMethod, "SINPE Móvil");
+  const currentHeaders = { ...admin, "if-match": confirmed.headers.ETag };
+  for (const course of ["missing", "servicio:talleres-personalizados", "../bad", null, {}]) {
+    assert.equal((await api(request("enrollments", "PUT", { status: "confirmed", course }, currentHeaders, query))).status, 400);
+  }
+  const moved = await api(request("enrollments", "PUT", { status: "confirmed", course: "paramo", email: "ignore@example.org", originalAssignment: { course: "forged" } }, currentHeaders, query));
+  assert.equal(moved.status, 200);
+  for (const key of ["name", "email", "phone", "phoneCountry", "message", "consent", "createdAt"]) assert.equal(moved.body[key], record.value[key]);
+  assert.equal(moved.body.course, "paramo");
+  assert.equal(moved.body.programId, "paramo");
+  assert.equal(moved.body.editionCode, "PAR-01");
+  assert.equal(moved.body.paymentMethod, "SINPE Móvil");
+  assert.equal(moved.body.originalAssignment.course, "niebla");
+  assert.equal(moved.body.originalAssignment.editionCode, "NIE-01");
+  assert.equal((await api(request("enrollments", "PUT", { status: "withdrawn", course: "sotomonte" }, currentHeaders, query))).status, 409);
+  const again = await api(request("enrollments", "PUT", { status: "attending", course: "sotomonte" }, { ...admin, "if-match": moved.headers.ETag }, query));
+  assert.equal(again.status, 200);
+  assert.equal(again.body.originalAssignment.course, "niebla");
+  assert.equal(again.body.course, "sotomonte");
+  assert.equal(again.body.paymentMethod, "SINPE Móvil");
+  assert.equal([...store.data.keys()].filter((name) => name.startsWith("submissions/enrollment/")).length, 1);
+  await api(request("enrollment", "POST", { ...body, course: "servicio:talleres-personalizados" }));
+  const service = store.records[1];
+  const serviceRecord = await store.read(`submissions/enrollment/${service.id}`);
+  const assigned = await api(request("enrollments", "PUT", { status: "interested", course: "paramo" }, { ...admin, "if-match": serviceRecord.version }, { id: service.id }));
+  assert.equal(assigned.status, 200);
+  assert.equal(assigned.body.serviceId, undefined);
+  assert.equal(assigned.body.serviceName, undefined);
+  assert.equal(assigned.body.originalAssignment.serviceId, "talleres-personalizados");
+  const legacyId = `2025-01-01T10:00:00.000Z-${randomUUID()}`;
+  await store.write(`submissions/enrollment/${legacyId}`, { ...body, status: "confirmed" }, "initial");
+  const legacy = (await api(request("enrollments", "GET", null, admin))).body.items.find(({ id }) => id === legacyId);
+  assert.equal(legacy.value.status, "confirmed");
+  assert.equal(legacy.value.paymentMethod, undefined);
 });
 
 test("production administration requires configured Entra tenant and exact domain, never demo or GitHub credentials", async () => {

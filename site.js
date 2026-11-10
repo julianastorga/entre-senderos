@@ -1,4 +1,4 @@
-import { STORAGE_KEY, WORKSHOP_ACCENTS, WORKSHOP_PRICE, sessionDates, upcomingEditions, formatDate, formatPrice, formatSchedule, formatCadence } from "./workshops.mjs";
+import { STORAGE_KEY, WORKSHOP_ACCENTS, sessionDates, upcomingEditions, formatDate, formatWorkshopPrices, formatSchedule, formatCadence } from "./workshops.mjs";
 import { CATALOG_KEY, loadCatalog, flattenInstances } from "./catalog-model.mjs";
 import { createCalendar } from "./calendar.mjs";
 import { createAdmin } from "./admin.mjs";
@@ -13,6 +13,9 @@ import { createSettingsAdmin } from "./admin-settings.mjs";
 import { createEnrollmentAdmin } from "./enrollment-admin.mjs";
 import { initPhoneInput, validatePhone } from "./assets/phone-input.js";
 import { beginLoading } from "./loading.mjs";
+import { PAGE_COPY_KEY } from "./page-copy-model.mjs";
+import { loadPageCopy } from "./page-copy.mjs";
+import { createPageCopyAdmin } from "./page-copy-admin.mjs";
 
 document.documentElement.classList.add("js");
 initNavigation();
@@ -27,7 +30,6 @@ let canAdminister = true;
 if (CLOUD_MODE) {
   document.querySelector(".preview-bar").textContent = "Aplicación de demostración · Contenido compartido en Azure · Identidad por definir";
   document.querySelectorAll('.footer-links a[href="admin.html"]').forEach((link) => { link.textContent = "Administración"; });
-  if (document.querySelector("[data-upcoming-editions]")) document.querySelector(".page-intro > p:last-child").textContent = "Consulta la descripción, la frecuencia y las fechas de cada propuesta. Los cambios de administración se comparten aquí y en el calendario.";
   if (document.querySelector(".backup-section > p")) document.querySelector(".backup-section > p").textContent = "Exporta el catálogo como copia de seguridad. Importar reemplaza el catálogo compartido de este entorno de Azure. El archivo no incluye los textos de la muestra.";
   if (document.querySelector("#workshop-form")) {
     canAdminister = false;
@@ -155,6 +157,55 @@ const contactsReady = refreshContacts();
 window.addEventListener("contacts-changed", refreshContacts);
 window.addEventListener("storage", (event) => { if (event.key === "writing-contact-settings:v1" || event.key === null) refreshContacts(); });
 
+async function initPageCopy() {
+  const main = document.querySelector("[data-page-copy]");
+  if (!main) return;
+  const notice = element("div", undefined, "notice error-notice");
+  notice.id = "page-copy-error";
+  notice.setAttribute("role", "alert");
+  notice.hidden = true;
+  const message = element("p");
+  const retry = element("button", "Reintentar carga de textos", "button button-outline");
+  retry.type = "button";
+  notice.append(message, retry);
+  main.prepend(notice);
+  let loaded = false;
+  let request = 0;
+  async function refresh() {
+    const current = ++request;
+    const finish = [...main.querySelectorAll("[data-page-copy-region]")].map((target) =>
+      beginLoading(target, { label: "Cargando textos de la página", shape: "lines", count: 1, show: !loaded }));
+    retry.disabled = true;
+    try {
+      const { value } = await loadPageCopy();
+      if (current !== request) return;
+      for (const [key, text] of Object.entries(value.pages[main.dataset.pageCopy])) {
+        const node = main.querySelector(`[data-page-copy-field="${key}"]`);
+        if (key === "body") {
+          node.replaceChildren(...text.split(/\n\s*\n/u).filter(Boolean).map((paragraph) => element("p", paragraph)));
+        } else node.textContent = text;
+        node.hidden = !text;
+      }
+      loaded = true;
+      notice.hidden = true;
+    } catch (error) {
+      if (current !== request) return;
+      message.textContent = `No se pudieron cargar los textos de esta página. ${error.message} El contenido visible puede no estar actualizado.`;
+      notice.hidden = false;
+    } finally {
+      finish.forEach((done) => done());
+      if (current === request) retry.disabled = false;
+    }
+  }
+  retry.addEventListener("click", refresh);
+  window.addEventListener("page-copy-changed", refresh);
+  window.addEventListener("storage", (event) => { if ([PAGE_COPY_KEY, null].includes(event.key)) refresh(); });
+  if (CLOUD_MODE) window.addEventListener("focus", refresh);
+  window.addEventListener("pageshow", (event) => { if (event.persisted) refresh(); });
+  await refresh();
+}
+const pageCopyReady = initPageCopy();
+
 function element(tag, text, className) {
   const node = document.createElement(tag);
   if (text !== undefined) node.textContent = text;
@@ -210,7 +261,7 @@ function renderCatalog(catalog) {
       if (!offering.coverImage) detail.append(element("p", "Portada de ejemplo · Imagen del taller por definir.", "small-print offering-cover-caption"));
       for (const [id, label, value, pending] of [
         ["modality", "Modalidad", offering.modality, ""],
-        ["price", "Precio por edición", formatPrice(WORKSHOP_PRICE), ""],
+        ["price", "Precios por edición", formatWorkshopPrices(offering), ""],
         ["overview", "En qué consiste", offering.overview, "La descripción de la dinámica de este taller todavía no se ha publicado."],
         ["audience", "A quién está dirigido", offering.audience, "El público al que se dirige este taller todavía no se ha publicado."],
         ["objectives", "Objetivos", offering.objectives, "Los objetivos de este taller todavía no se han publicado."],
@@ -246,7 +297,7 @@ function renderCatalog(catalog) {
         const dates = sessionDates(instance);
         const card = element("article", undefined, "course-card");
         card.style.setProperty("--workshop-accent", WORKSHOP_ACCENTS[offering.accent].color);
-        card.append(element("h3", instance.code), element("p", `${formatDate(dates[0])} – ${formatDate(dates.at(-1))}`), element("p", `${formatCadence(instance)} · ${instance.sessions} encuentros`), element("p", formatSchedule(instance)), element("p", formatPrice(instance.price)));
+        card.append(element("h3", instance.code), element("p", `${formatDate(dates[0])} – ${formatDate(dates.at(-1))}`), element("p", `${formatCadence(instance)} · ${instance.sessions} encuentros`), element("p", formatSchedule(instance)), element("p", formatWorkshopPrices(instance)));
         const signup = element("a", "Inscribirme en esta edición", "button");
         signup.setAttribute("aria-label", `Inscribirme en esta edición: ${instance.code}`);
         signup.href = `contacto.html?edicion=${encodeURIComponent(instance.id)}#inscripcion`;
@@ -316,7 +367,7 @@ function renderCatalog(catalog) {
 
 function signupEditionOption(instance, selected = false) {
   const option = new Option(`${instance.name} · ${instance.code} · ${formatDate(instance.startDate)}`, instance.id, selected, selected);
-  option.dataset.price = formatPrice(instance.price);
+  option.dataset.price = formatWorkshopPrices(instance);
   return option;
 }
 
@@ -325,7 +376,7 @@ function updateSignupPrice() {
   const price = document.querySelector("#signup-price");
   if (!select || !price) return;
   const amount = select.selectedOptions[0]?.dataset.price;
-  price.textContent = amount ? `Precio total de esta edición: ${amount}. La solicitud no realiza cobros.`
+  price.textContent = amount ? `Precios totales de esta edición: ${amount}. La solicitud no realiza cobros.`
     : select.value.startsWith("servicio:") ? "El precio del servicio se definirá en una propuesta personalizada. La solicitud no realiza cobros." : "";
   price.hidden = !price.textContent;
 }
@@ -417,14 +468,14 @@ document.querySelectorAll("[data-preview-form]").forEach((form) => {
 const calendar = createCalendar();
 const admin = canAdminister ? createAdmin(refreshWorkshops) : null;
 const viewsReady = [
-  contactsReady,
+  contactsReady, pageCopyReady,
   initFeaturedView(contentStorage, refreshShowcase, CLOUD_MODE, async (path, options) => (await apiRequest(`editorial${path}`, options)).value),
-  ...(canAdminister ? [createFeaturedAdmin(), createSettingsAdmin(), createEnrollmentAdmin()] : []),
+  ...(canAdminister ? [createFeaturedAdmin(), createSettingsAdmin(), createEnrollmentAdmin(), createPageCopyAdmin()] : []),
 ];
 
 const adminTabs = document.querySelector('[role="tablist"]');
 if (adminTabs && canAdminister) {
-  for (const [id, label, panel, hash] of [["enrollments", "Inscripciones", "enrollments-panel", "inscripciones"], ["settings", "Contactos", "settings-panel", "contactos"], ["mail", "Boletín", "mail-panel", "boletin"]]) {
+  for (const [id, label, panel, hash] of [["enrollments", "Inscripciones", "enrollments-panel", "inscripciones"], ["page-copy", "Textos de páginas", "page-copy-panel", "textos"], ["settings", "Contactos", "settings-panel", "contactos"], ["mail", "Boletín", "mail-panel", "boletin"]]) {
     const button = element("button", label); button.id = `tab-${id}`; button.type = "button";
     button.setAttribute("role", "tab"); button.setAttribute("aria-controls", panel); button.setAttribute("aria-selected", "false"); button.tabIndex = -1; button.dataset.tabHash = hash; adminTabs.append(button);
   }

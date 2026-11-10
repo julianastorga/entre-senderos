@@ -4,6 +4,12 @@ export const MAX_STORY_IMAGES = 12;
 export const MAX_STORY_HTML_SIZE = 4_500_000;
 export const IMAGE_PATH = /^\/api\/images\/[a-f0-9]{64}\.(?:jpg|png|webp)$/u;
 
+export function validateImageFile(file) {
+  if (!file) throw new Error("Elige una imagen JPG, PNG o WebP.");
+  if (!Number.isSafeInteger(file.size) || file.size <= 0) throw new Error("El archivo está vacío. Elige otra imagen JPG, PNG o WebP.");
+  if (file.size > MAX_IMAGE_FILE_BYTES) throw new Error("La imagen supera el límite de 8 MB por archivo. Elige una imagen más pequeña.");
+}
+
 export function imageMime(bytes) {
   if (bytes.length >= 8 && [137, 80, 78, 71, 13, 10, 26, 10].every((value, index) => bytes[index] === value)) return "image/png";
   if (bytes.length >= 3 && bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255) return "image/jpeg";
