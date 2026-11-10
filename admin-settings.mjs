@@ -62,11 +62,12 @@ export async function createSettingsAdmin() {
     <p>Solo las direcciones confirmadas reciben campañas. Una baja nunca se reactiva desde administración. Eliminar borra el registro; conservar una baja mantiene su exclusión.</p>
     <div id="subscriber-list" class="admin-workshops"></div><button id="more-subscribers" class="text-button" type="button" hidden>Cargar más direcciones</button></section>
     <section class="section"><h2>Campañas y programación</h2><p>Los envíos usan hora de Costa Rica (UTC−6), con revisión cada cinco minutos y lotes de hasta 20 destinatarios. Gmail acepta el mensaje; no garantiza su entrega. Revisa las cuotas de tu cuenta antes de enviar.</p>
+    <details class="admin-create"><summary id="campaign-form-title">Nuevo borrador</summary>
     <form id="campaign-form"><fieldset disabled><legend class="sr-only">Borrador de campaña</legend>
     <div class="field"><label for="campaign-subject">Asunto *</label><input id="campaign-subject" name="subject" required maxlength="150"></div>
     <div class="field"><label for="campaign-body">Contenido de texto *</label><textarea id="campaign-body" name="body" required rows="8" maxlength="10000"></textarea></div>
     <p class="small-print">Se añade un enlace de baja individual. El contenido se envía como texto simple.</p>
-    <div class="button-row"><button type="submit" class="button">Guardar borrador</button><button id="new-campaign" type="button" class="button button-outline">Nuevo borrador</button></div></fieldset></form>
+    <div class="button-row"><button type="submit" class="button">Guardar borrador</button><button id="new-campaign" type="button" class="button button-outline">Nuevo borrador</button></div></fieldset></form></details>
     <p id="campaign-status" class="form-status" role="status" aria-live="polite"></p>
     <div class="button-row"><button type="button" id="reload-campaigns" class="button button-outline">Actualizar campañas</button><button type="button" id="dispatch-mail" class="button button-outline">Procesar envíos pendientes</button></div>
     <div id="campaign-list" class="admin-workshops"></div><button id="more-campaigns" type="button" class="text-button" hidden>Cargar más campañas</button></section>`;
@@ -74,6 +75,8 @@ export async function createSettingsAdmin() {
   const campaignStatus = panel.querySelector("#campaign-status");
   const form = panel.querySelector("#mail-settings-form");
   const campaignForm = panel.querySelector("#campaign-form");
+  const campaignDisclosure = campaignForm.closest("details");
+  const campaignTitle = panel.querySelector("#campaign-form-title");
   let settingsVersion, settings = {}, editing = null, subscriberToken, campaignToken;
   let subscribersLoaded = false, campaignsLoaded = false;
   panel.querySelector("#mail-redirect").textContent = `${location.origin}/api/mail/google/callback`;
@@ -170,6 +173,8 @@ export async function createSettingsAdmin() {
         const edit = el("button", "Editar borrador", "button button-outline"); edit.type = "button";
         edit.addEventListener("click", () => {
           editing = { id: campaign.id, version: record.version };
+          campaignTitle.textContent = "Editar borrador";
+          campaignDisclosure.open = true;
           campaignForm.elements.subject.value = campaign.subject; campaignForm.elements.body.value = campaign.body; campaignForm.elements.subject.focus();
         });
         const send = el("button", "Enviar ahora", "button"); send.type = "button"; send.disabled = !settings.enabled;
@@ -177,7 +182,7 @@ export async function createSettingsAdmin() {
           if (!confirm(`¿${sendAt ? "Programar" : "Enviar"} «${campaign.subject}» a todas las direcciones confirmadas? Se respetarán las bajas antes de cada envío.`)) return;
           await run(async () => {
             campaignStatus.textContent = (await post(`mail/campaigns/${campaign.id}/queue`, { sendAt, version: record.version })).value.message;
-            if (editing?.id === campaign.id) { editing = null; campaignForm.reset(); }
+            if (editing?.id === campaign.id) { editing = null; campaignForm.reset(); campaignTitle.textContent = "Nuevo borrador"; }
             await loadCampaigns();
           }, campaignStatus);
         }
@@ -214,13 +219,15 @@ export async function createSettingsAdmin() {
     const body = { ...Object.fromEntries(new FormData(campaignForm)), ...editing };
     run(async () => {
       const { value } = await post("mail/campaigns", body);
+      campaignTitle.textContent = "Editar borrador";
       editing = { id: value.id, version: value.version }; await loadCampaigns();
       campaignStatus.textContent = "Borrador guardado. No se envió ningún correo.";
     }, campaignStatus);
   });
   panel.querySelector("#new-campaign").addEventListener("click", () => {
     if (!confirm("¿Descartar cambios sin guardar y abrir un borrador nuevo?")) return;
-    editing = null; campaignForm.reset(); campaignStatus.textContent = "";
+    editing = null; campaignForm.reset(); campaignTitle.textContent = "Nuevo borrador"; campaignStatus.textContent = "";
+    campaignDisclosure.open = true; campaignForm.elements.subject.focus();
   });
   panel.querySelector("#reload-subscribers").addEventListener("click", () => run(() => loadSubscribers()));
   panel.querySelector("#more-subscribers").addEventListener("click", () => run(() => loadSubscribers(true)));

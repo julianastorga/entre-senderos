@@ -2,10 +2,23 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   DEFAULT_WORKSHOPS, STORAGE_KEY, WorkshopValidationError, sessionDates,
-  parseDate, validateWorkshop, validateCatalog, loadWorkshops, saveWorkshops, formatSchedule, upcomingEditions,
+  parseDate, validateWorkshop, validateCatalog, loadWorkshops, saveWorkshops, formatSchedule, upcomingEditions, enrollmentOpen, enrollmentClosesAt,
 } from "../workshops.mjs";
 
 const sample = { ...DEFAULT_WORKSHOPS[0] };
+
+test("public enrollment closes exactly at the first session start in Costa Rica, including UTC date rollover", () => {
+  const edition = { ...sample, startDate: "2027-01-19", startTime: "18:00" };
+  assert.equal(enrollmentClosesAt(edition), Date.parse("2027-01-20T00:00:00Z"));
+  assert.equal(enrollmentOpen(edition, new Date("2027-01-19T23:59:59.999Z")), true);
+  assert.equal(enrollmentOpen(edition, new Date("2027-01-20T00:00:00Z")), false);
+  assert.equal(enrollmentOpen(edition, new Date("2027-01-21T18:00:00Z")), false);
+  assert.equal(enrollmentOpen({ ...edition, startTime: "00:00" }, new Date("2027-01-19T05:59:59.999Z")), true);
+  assert.equal(enrollmentOpen({ ...edition, startTime: "00:00" }, new Date("2027-01-19T06:00:00Z")), false);
+  assert.equal(enrollmentOpen({ ...edition, startDate: "2027-02-01" }, new Date("2027-01-20T00:00:00Z")), true);
+  assert.throws(() => enrollmentClosesAt({ ...edition, startDate: "2027-02-30" }), /no existe/u);
+  assert.throws(() => enrollmentClosesAt({ ...edition, startTime: "24:00" }), /hora/u);
+});
 
 test("upcoming editions include today until midnight in Costa Rica, not UTC or the browser timezone", () => {
   const editions = [

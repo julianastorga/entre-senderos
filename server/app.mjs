@@ -1,5 +1,6 @@
 import sanitizeHtml from "sanitize-html";
 import { flattenInstances, validateCatalogV2 } from "../catalog-model.mjs";
+import { enrollmentOpen } from "../workshops.mjs";
 import { readCatalog } from "./catalog-store.mjs";
 import { readShowcase } from "./showcase-store.mjs";
 import { MAX_TEXT_SIZE, validateShowcase } from "../featured-text.mjs";
@@ -73,7 +74,7 @@ function storyText(html) {
 export function createApi({
   store, adminLogins, environment = "demo", demoAuth = null,
   productionDomain = "", productionTenantId = "", verifyNewsletterDomain = verifyMailDomain,
-  mail = null, schedulerKey = "",
+  mail = null, schedulerKey = "", now = () => new Date(),
 }) {
   if (!["demo", "production"].includes(environment)) throw new Error("El entorno de la aplicación no es válido.");
   const admins = adminLogins.split(",").map((login) => login.trim().toLowerCase()).filter(Boolean);
@@ -455,6 +456,7 @@ export function createApi({
           const instance = flattenInstances(catalog).find((workshop) => workshop.id === body.course);
           const service = typeof body.course === "string" && body.course.startsWith("servicio:") ? catalog.services.find((item) => item.id === body.course.slice(9)) : null;
           if (body.course !== "orientacion" && !instance && !service) throw new HttpError(400, "La edición o el servicio seleccionado ya no está disponible.");
+          if (instance && !enrollmentOpen(instance, now())) throw new HttpError(409, "Esta edición ya comenzó y no admite nuevas inscripciones. Suscríbete al boletín para conocer los próximos talleres.");
           if (instance) Object.assign(value, editionAssignment(instance));
           if (service) Object.assign(value, { serviceId: service.id, serviceName: service.name });
           Object.assign(value, { ...contact, course: body.course, status: "interested" });

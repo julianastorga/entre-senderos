@@ -19,6 +19,7 @@
     <section class="page-intro"><p class="eyebrow">Consultas y solicitudes</p><h1>Contacto e inscripción</h1><p>Este será el punto de encuentro para resolver dudas y solicitar tu inscripción. Por ahora puedes explorar cómo funcionará.</p></section>
     <section class="contact-layout section-bottom">
       <div id="inscripcion" class="form-panel"><h2>Solicitud de inscripción</h2><p class="form-intro">Vista previa: usa datos ficticios. El formulario no envía ni guarda información y no reserva un lugar.</p>
+        <div id="signup-closed" role="status" aria-live="polite" hidden></div>
         <form data-preview-form novalidate>
           <fieldset disabled data-preview-fields><legend class="sr-only">Datos de la solicitud de muestra</legend>
             <div class="sr-only" aria-hidden="true"><label for="signup-website">Deja este campo vacío</label><input id="signup-website" name="website" tabindex="-1" autocomplete="off"></div>
@@ -29,8 +30,9 @@
             <label class="checkbox-label"><input id="signup-consent" type="checkbox" name="consent" required aria-describedby="signup-consent-error"><span>Entiendo que este formulario es una demostración y que no se enviarán mis datos. <span aria-hidden="true">*</span></span></label><span id="signup-consent-error" class="field-error"></span>
             <button type="submit" class="button">Probar solicitud <span aria-hidden="true">↗</span></button>
           </fieldset>
-          <p class="small-print">Los campos con * son obligatorios. No hay pagos ni inscripciones activas.</p><p class="form-status" role="status" aria-live="polite"></p>
+          <p class="small-print">Los campos con * son obligatorios. No hay pagos ni inscripciones activas.</p>
         </form>
+        <p id="signup-status" class="form-status" role="status" aria-live="polite"></p>
         <noscript><p class="notice">La vista previa del formulario necesita JavaScript. No se realizará ningún envío.</p></noscript>
       </div>
       <aside class="contact-aside">

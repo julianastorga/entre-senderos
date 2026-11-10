@@ -68,7 +68,7 @@ const frontend = [
   "catalog-model.mjs", "offering-admin.mjs", "contact-model.mjs", "contact-settings.mjs",
   "admin-settings.mjs", "newsletter-actions.mjs",
   "editorial-model.mjs", "reaction-model.mjs", "reactions.mjs", "sample-posts.mjs",
-  "loading.mjs", "enrollment-admin.mjs", "enrollment-model.mjs",
+  "loading.mjs", "enrollment-admin.mjs", "enrollment-model.mjs", "enrollment-view.mjs",
   "page-copy-model.mjs", "page-copy.mjs", "page-copy-admin.mjs",
   "index.html", "cursos.html", "servicios.html", "propuesta.html", "calendario.html",
   "muestra.html", "texto.html", "acerca-de.html", "contacto.html", "newsletter.html", "admin.html",

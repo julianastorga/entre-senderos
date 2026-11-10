@@ -105,6 +105,38 @@ test("edition and service inquiries retain immutable offering references after a
   assert.equal((await api(request("workshops", "PUT", { version: 1, workshops: DEFAULT_WORKSHOPS }, admin))).status, 409);
 });
 
+test("public enrollment rejects started editions and stale legacy IDs, without blocking future editions or private administration", async () => {
+  let instant = new Date("2027-01-19T23:59:59.999Z");
+  const { api, store } = create(new MemoryStore(), { now: () => instant });
+  const body = { email: "lectora@dominio.org", name: "Prueba", consent: true, phone: "+1 202 555 0123", phoneCountry: "US", course: "niebla" };
+  assert.equal((await api(request("enrollment", "POST", body))).status, 202);
+  const catalog = await api(request("catalog"));
+  const instances = [...catalog.body.instances, { ...catalog.body.instances[0], id: "next-niebla", code: "NIE-02", startDate: "2027-01-26" }];
+  assert.equal((await api(request("catalog", "PUT", { ...catalog.body, instances }, { ...admin, "if-match": catalog.headers.ETag }))).status, 200);
+  instant = new Date("2027-01-20T00:00:00Z");
+  for (const headers of [{}, admin]) {
+    const closed = await api(request("enrollment", "POST", body, headers));
+    assert.equal(closed.status, 409);
+    assert.match(closed.body.error, /ya comenzó.*boletín/u);
+  }
+  assert.equal(store.records.length, 1);
+  assert.equal((await api(request("enrollment", "POST", { ...body, course: "next-niebla" }))).status, 202);
+  assert.equal((await api(request("enrollment", "POST", { ...body, course: "servicio:talleres-personalizados" }))).status, 202);
+  assert.equal((await api(request("enrollment", "POST", { ...body, course: "orientacion" }))).status, 202);
+  assert.equal((await api(request("enrollment", "POST", { ...body, course: "sotobosque" }))).status, 400);
+  assert.equal(store.records.length, 4);
+  const id = `${instant.toISOString()}-${randomUUID()}`;
+  const manual = await api(request("enrollments", "POST", { ...body, id }, admin));
+  assert.equal(manual.status, 201);
+  assert.equal(manual.body.value.editionCode, "NIE-01");
+  assert.equal(manual.body.value.source, "admin");
+  const moved = await api(request("enrollments", "PUT", { status: "interested", course: "next-niebla" }, { ...admin, "if-match": manual.headers.ETag }, { id }));
+  assert.equal(moved.status, 200);
+  const returned = await api(request("enrollments", "PUT", { status: "interested", course: "niebla" }, { ...admin, "if-match": moved.headers.ETag }, { id }));
+  assert.equal(returned.status, 200);
+  assert.equal(returned.body.editionCode, "NIE-01");
+});
+
 test("workshop sections are shared and validated, and older edition editors cannot erase them", async () => {
   const { api } = create();
   const initial = await api(request("catalog"));

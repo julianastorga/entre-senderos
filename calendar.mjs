@@ -1,4 +1,5 @@
-import { WORKSHOP_ACCENTS, sessionDates, parseDate, formatDate, formatSchedule, formatCadence } from "./workshops.mjs";
+import { WORKSHOP_ACCENTS, sessionDates, parseDate, formatDate, formatSchedule, formatCadence, enrollmentOpen } from "./workshops.mjs";
+import { editionSignup, newsletterInvitation } from "./enrollment-view.mjs";
 
 function element(tag, text, className) {
   const node = document.createElement(tag);
@@ -46,9 +47,8 @@ export function createCalendar() {
     agendaTitle.textContent = formatDate(selectedDate);
     selected.forEach((event) => {
       const item = element("li");
-      const link = element("a", event.label);
-      link.href = `contacto.html?edicion=${encodeURIComponent(event.workshop.id)}#inscripcion`;
-      item.append(link);
+      if (enrollmentOpen(event.workshop)) item.append(editionSignup(event.workshop, { label: event.label, className: "text-link" }));
+      else item.append(element("p", event.label), newsletterInvitation());
       agendaList.append(item);
     });
     if (focus) agendaTitle.focus();
@@ -139,11 +139,8 @@ export function createCalendar() {
         detail.append(element("dt", label), value);
         details.append(detail);
       }
-      const link = element("a", "Ver formulario de inscripción", "text-link");
-      link.href = `contacto.html?edicion=${encodeURIComponent(workshop.id)}#inscripcion`;
-      link.setAttribute("aria-label", `Ver formulario de inscripción: ${workshop.name} · ${workshop.code}`);
       card.append(details, element("p", `${formatCadence(workshop)} · ${workshop.sessions} encuentros`),
-        element("p", formatSchedule(workshop)), link);
+        element("p", formatSchedule(workshop)), editionSignup(workshop, { label: "Ver formulario de inscripción", className: "text-link" }));
       list.append(card);
     });
     if (!workshops.length) list.append(element("p", "No hay talleres disponibles.", "empty-state"));

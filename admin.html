@@ -21,7 +21,7 @@
     <div id="services-panel" role="tabpanel" aria-labelledby="tab-services" hidden><div data-offering-admin="services"></div></div>
     <div id="workshops-panel" role="tabpanel" aria-labelledby="tab-workshops" hidden>
     <section class="admin-layout section">
-      <div class="form-panel"><h2 id="workshop-form-title">Crear edición</h2>
+      <div><details class="form-panel admin-create"><summary id="workshop-form-title">Crear edición</summary>
         <form id="workshop-form" novalidate><fieldset disabled id="workshop-fields"><legend class="sr-only">Configuración del taller</legend>
           <div class="field"><label for="workshop-program">Taller definido *</label><select id="workshop-program" name="programId" required><option value="">Elige un taller definido</option></select><p class="field-hint">El nombre, la descripción, los precios en CRC y USD y la portada se editan una sola vez en la pestaña Talleres. Cada edición tiene sus propias fechas y su enlace de inscripción.</p></div>
           <div class="field"><label for="workshop-code">Código único *</label><input id="workshop-code" name="code" required minlength="2" maxlength="24" pattern="[A-Za-z0-9][A-Za-z0-9_-]{1,23}" placeholder="Ej.: SOT-02" aria-describedby="code-help workshop-code-error"><p id="code-help" class="field-hint">De 2 a 24 letras o números; también puedes usar guiones. Se guarda en mayúsculas.</p><span class="field-error" id="workshop-code-error"></span></div>
@@ -32,7 +32,7 @@
           <div class="field"><label for="workshop-sessions">Número total de encuentros *</label><input id="workshop-sessions" name="sessions" type="number" min="1" max="52" step="1" value="6" required aria-describedby="sessions-help workshop-sessions-error"><p id="sessions-help" class="field-hint">Cuenta cada reunión, no cada semana. Martes y jueves durante 3 semanas activas son 6 encuentros.</p><span class="field-error" id="workshop-sessions-error"></span></div>
           <p id="recurrence-preview" class="notice" role="status" aria-live="polite">Elige una fecha para ver el inicio y el cierre.</p><p class="small-print">Cada mes conserva el día de inicio; si no existe, usa el último día de ese mes. Los precios se heredan del taller definido.</p>
           <div class="button-row"><button type="submit" class="button" id="save-workshop">Guardar edición</button><button type="button" class="button button-outline" id="cancel-edit" hidden>Cancelar edición</button></div>
-        </fieldset><p class="form-status" id="admin-status" role="status" aria-live="polite"></p></form>
+        </fieldset></form></details><p class="form-status" id="admin-status" role="status" aria-live="polite"></p>
         <noscript><p>Activa JavaScript para utilizar la administración local.</p></noscript>
       </div>
       <aside><h2 class="aside-heading">Ediciones programadas</h2><div id="admin-workshops" class="admin-workshops"></div></aside>
@@ -44,7 +44,7 @@
     <section id="featured-text-admin" class="section" aria-labelledby="featured-admin-title">
       <div class="section-heading"><div><p class="eyebrow">Independiente de los talleres</p><h2 id="featured-admin-title">Publicaciones del blog</h2></div><a class="text-link" href="muestra.html">Abrir blog</a></div>
       <p class="section-description">Publica relatos y entradas del blog con el mismo formato. Puedes acreditar a la persona autora y enlazar su blog. Importa un documento Word, HTML con formato o texto simple, o escribe directamente. Guardar un texto nuevo no reemplaza los demás.</p>
-      <div class="showcase-admin-layout"><aside class="showcase-saved"><div class="section-heading"><h3 class="aside-heading">Publicaciones guardadas</h3><button type="button" class="button button-outline" id="new-showcase-text">Nuevo texto</button></div><p class="small-print">Elige Editar, Leer o Eliminar en cualquier publicación, incluidas las muestras iniciales.</p><div id="showcase-texts"></div></aside><div class="showcase-editor"><div class="section-heading"><h3 id="text-form-title">Nuevo texto</h3></div>
+      <div class="showcase-admin-layout"><aside class="showcase-saved"><div class="section-heading"><h3 class="aside-heading">Publicaciones guardadas</h3><button type="button" class="button button-outline" id="new-showcase-text">Nuevo texto</button></div><p class="small-print">Elige Editar, Leer o Eliminar en cualquier publicación, incluidas las muestras iniciales.</p><div id="showcase-texts"></div></aside><div class="showcase-editor"><details class="admin-create"><summary id="text-form-title">Nuevo texto</summary>
       <form id="featured-text-form" novalidate><fieldset id="featured-text-fields" disabled><legend class="sr-only">Edición del texto destacado</legend>
         <p id="text-publication-date" class="small-print"></p>
         <div class="form-row"><div class="field"><label for="text-title">Título de la publicación *</label><input id="text-title" name="title" required minlength="2" maxlength="150"></div><div class="field"><label for="text-author">Crédito de autoría (opcional)</label><input id="text-author" name="author" maxlength="150" placeholder="Nombre o seudónimo elegido por la persona autora"></div></div>
@@ -93,7 +93,7 @@
         <label class="checkbox-label"><input id="text-sample" type="checkbox"><span>Identificar como publicación ficticia de demostración.</span></label>
         <label class="checkbox-label"><input id="text-permission" type="checkbox" required><span>Confirmo que cuento con autorización para publicar este texto, sus imágenes y su crédito de autoría.</span></label>
         <div class="button-row"><button class="button" type="submit">Guardar texto</button><a class="text-link" id="text-reading-link" href="muestra.html" hidden>Abrir vista de lectura</a></div>
-      </fieldset><p id="text-admin-status" class="form-status" role="status" aria-live="polite"></p></form>
+      </fieldset></form></details><p id="text-admin-status" class="form-status" role="status" aria-live="polite"></p>
       <button type="button" class="text-button" id="reset-featured-text">Restablecer blog de ejemplo</button>
       <noscript><p class="notice">Activa JavaScript para editar y guardar el texto destacado.</p></noscript>
       </div></div>

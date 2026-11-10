@@ -222,6 +222,20 @@ export function upcomingEditions(workshops, now = new Date()) {
   return workshops.filter((workshop) => workshop.startDate >= today).sort(compareEditions);
 }
 
+export function enrollmentClosesAt(workshop) {
+  const date = parseDate(workshop.startDate);
+  if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/u.test(workshop.startTime)) throw new Error("La hora de inicio no es válida.");
+  const [hours, minutes] = workshop.startTime.split(":").map(Number);
+  // All editions use Costa Rica's fixed UTC-6 schedule.
+  date.setUTCHours(hours + 6, minutes, 0, 0);
+  return date.getTime();
+}
+
+export function enrollmentOpen(workshop, now = new Date()) {
+  if (!Number.isFinite(now.getTime())) throw new Error("La fecha actual no es válida.");
+  return now.getTime() < enrollmentClosesAt(workshop);
+}
+
 export function activeAndUpcomingEditions(workshops, now = new Date()) {
   const today = workshopToday(now);
   return workshops.filter((workshop) => sessionDates(workshop).at(-1) >= today).sort(compareEditions);

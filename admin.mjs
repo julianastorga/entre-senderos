@@ -2,6 +2,7 @@ import { DEFAULT_WORKSHOPS, validateCatalog, validateWorkshop, sessionDates, for
 import { loadCatalog, validateCatalogV2, migrateWorkshops, flattenInstances } from "./catalog-model.mjs";
 import { contentStorage, refreshCatalog, persistCatalog, storageLocation } from "./content-store.mjs";
 import { createOfferingAdmin } from "./offering-admin.mjs";
+import { editionSignup } from "./enrollment-view.mjs";
 
 export function createAdmin(onSaved) {
   const form = document.querySelector("#workshop-form");
@@ -13,6 +14,7 @@ export function createAdmin(onSaved) {
   const preview = document.querySelector("#recurrence-preview");
   const list = document.querySelector("#admin-workshops");
   const title = document.querySelector("#workshop-form-title");
+  const disclosure = form.closest("details");
   const cancel = document.querySelector("#cancel-edit");
   const weeklyFields = document.querySelector("#weekly-fields");
   const weekdays = [...form.querySelectorAll('[name="weekday"]')];
@@ -140,6 +142,7 @@ export function createAdmin(onSaved) {
           editing = structuredClone(instance);
           for (const key of ["programId", "code", "startDate", "startTime", "endTime", "cadence", "sessions", "weekInterval"]) form.elements[key].value = instance[key];
           weekdays.forEach((field) => { field.checked = instance.weekdays.includes(Number(field.value)); });
+          disclosure.open = true;
           title.textContent = "Editar edición"; cancel.hidden = false; status.textContent = ""; updatePreview(); form.elements.programId.focus();
         });
         const remove = document.createElement("button"); remove.type = "button"; remove.className = "text-button"; remove.textContent = "Eliminar edición";
@@ -157,8 +160,7 @@ export function createAdmin(onSaved) {
             status.textContent = `No se eliminó la edición. ${error.message}`;
           } finally { panel.inert = false; }
         });
-        const signup = document.createElement("a"); signup.className = "text-link"; signup.textContent = "Formulario de esta edición";
-        signup.href = `contacto.html?edicion=${encodeURIComponent(instance.id)}#inscripcion`;
+        const signup = editionSignup(workshop, { label: "Formulario de esta edición", className: "text-link" });
         const actions = document.createElement("div"); actions.className = "button-row"; actions.append(edit, remove, signup);
         card.append(code, heading, description, actions); list.append(card);
       }
